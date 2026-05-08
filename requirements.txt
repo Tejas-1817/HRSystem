@@ -1,0 +1,7 @@
+Flask
+PyJWT
+flask-cors
+mysql-connector-python
+openpyxl==3.1.5
+python-dateutil
+python-dotenv
