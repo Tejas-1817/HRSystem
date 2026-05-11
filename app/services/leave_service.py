@@ -1,11 +1,128 @@
 # ---------------------------------------------------------------------------
 # Leave Service — Allocation, balance queries, conflict validation,
-#                 and half-day duration calculation
+#                 half-day duration calculation, and RBAC approval logic
 # ---------------------------------------------------------------------------
 
 from decimal import Decimal
 from datetime import date, timedelta
 from app.models.database import execute_query, execute_single
+
+
+# ---------------------------------------------------------------------------
+# RBAC — Approval Authority Validation
+# ---------------------------------------------------------------------------
+
+# Role hierarchy: who can approve whose leave
+# Format: { requester_role: [allowed_approver_roles] }
+_APPROVAL_MATRIX = {
+    "employee": ["manager", "admin"],
+    "hr":       ["admin"],
+    "manager":  ["admin"],
+    "admin":    [],  # Admins don't need approval
+}
+
+
+def validate_approval_authority(approver: dict, leave: dict) -> dict:
+    """
+    Enforce the role-based leave approval hierarchy.
+
+    Rules:
+      - employee leave  → approved by manager or admin
+      - hr leave        → approved by admin ONLY
+      - manager leave   → approved by admin ONLY
+      - admin leave     → no one needs to approve (guard returns ok=False)
+      - No self-approval for any role
+
+    Args:
+        approver : current_user dict from JWT (keys: employee_name, role)
+        leave    : leave row from DB (keys: employee_name, requester_role)
+
+    Returns:
+        {"ok": True}  — approver is authorised
+        {"ok": False, "error": "<message>", "code": <http_status_int>}
+    """
+    approver_name = approver.get("employee_name")
+    approver_role = approver.get("role", "")
+    requester_name = leave.get("employee_name")
+
+    # ── Fetch requester role (use stored snapshot if available, else query) ──
+    requester_role = leave.get("requester_role")
+    if not requester_role:
+        user_row = execute_single(
+            "SELECT role FROM users WHERE employee_name = %s LIMIT 1",
+            (requester_name,)
+        )
+        requester_role = user_row["role"] if user_row else "employee"
+
+    # ── Self-approval block ──────────────────────────────────────────────────
+    if approver_name == requester_name:
+        return {
+            "ok": False,
+            "error": "Self-approval is not permitted. Please contact your designated approver.",
+            "code": 403,
+        }
+
+    # ── Admin bypass: admin can approve everyone except themselves ───────────
+    if approver_role == "admin":
+        if requester_role == "admin":
+            return {
+                "ok": False,
+                "error": "Admin leave requests do not require approval.",
+                "code": 400,
+            }
+        return {"ok": True}
+
+    # ── Lookup allowed approvers for this requester's role ───────────────────
+    allowed = _APPROVAL_MATRIX.get(requester_role, [])
+    if approver_role not in allowed:
+        role_label = requester_role.title()
+        allowed_label = " or ".join(r.title() for r in allowed) if allowed else "No one"
+        return {
+            "ok": False,
+            "error": (
+                f"Unauthorized leave approval action. "
+                f"{role_label} leave requests can only be approved by: {allowed_label}. "
+                f"Your role ({approver_role.title()}) does not have this permission."
+            ),
+            "code": 403,
+        }
+
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Manager Resolution — find the right approver for an employee
+# ---------------------------------------------------------------------------
+
+def get_employee_manager(employee_name: str) -> str | None:
+    """
+    Resolve the designated manager for a given employee.
+
+    Strategy (priority order):
+      1. Most recently assigned project manager via project_assignments
+      2. Any active manager in the system (fallback)
+
+    Returns the manager's employee_name, or None if not found.
+    """
+    # 1. Most recent active project assignment
+    row = execute_single("""
+        SELECT p.manager_name
+        FROM project_assignments pa
+        JOIN projects p ON pa.project_id = p.id
+        WHERE pa.employee_name = %s
+          AND p.status NOT IN ('completed', 'closed', 'cancelled')
+          AND p.manager_name IS NOT NULL
+        ORDER BY pa.assigned_at DESC
+        LIMIT 1
+    """, (employee_name,))
+    if row and row.get("manager_name"):
+        return row["manager_name"]
+
+    # 2. Fallback: any active manager
+    mgr = execute_single(
+        "SELECT employee_name FROM users WHERE role = 'manager' AND is_active = TRUE LIMIT 1"
+    )
+    return mgr["employee_name"] if mgr else None
 
 # Default leave quotas (used if leave_config table is empty or missing)
 DEFAULT_LEAVE_QUOTAS = [
