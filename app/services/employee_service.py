@@ -36,10 +36,10 @@ def create_employee_record(data, role, cursor, with_user=True):
     # 1. Insert employee record
     cursor.execute("""
         INSERT INTO employee 
-        (name, original_name, email, phone, role, salary, date_of_birth, date_of_joining, photo, pdf_file, docx_file)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (name, original_name, email, phone, salary, date_of_birth, date_of_joining, photo, pdf_file, docx_file)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
-        employee_name, original_name, email, data.get("phone"), role,
+        employee_name, original_name, email, data.get("phone"),
         data.get("salary"), dob, doj, data.get("photo_path"), 
         data.get("pdf_path"), data.get("docx_path")
     ))
