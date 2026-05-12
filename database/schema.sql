@@ -1,18 +1,17 @@
 -- Create DB
-CREATE DATABASE IF NOT EXISTS starterdata;
-USE starterdata;
+USE hrms;
 
--- 🔥 Remove all old users (important)
-DROP USER IF EXISTS 'tejas'@'%';
-DROP USER IF EXISTS 'tejas'@'localhost';
+-- -- 🔥 Remove all old users (important)
+-- DROP USER IF EXISTS 'tejas'@'%';
+-- DROP USER IF EXISTS 'tejas'@'localhost';
 
--- 🔥 Create user for all devices
-CREATE USER 'tejas'@'%' IDENTIFIED BY 'password';
+-- -- 🔥 Create user for all devices
+-- CREATE USER 'tejas'@'%' IDENTIFIED BY 'password';
 
--- Give full access
--- ALTER user 'tejas'@'%' IDENTIFIED by 'password123';
-GRANT ALL PRIVILEGES ON starterdata.* TO 'tejas'@'%';
-FLUSH PRIVILEGES;
+-- -- Give full access
+-- -- ALTER user 'tejas'@'%' IDENTIFIED by 'password123';
+-- GRANT ALL PRIVILEGES ON hrms.* TO 'tejas'@'%';
+-- FLUSH PRIVILEGES;
 
 
 
@@ -32,7 +31,6 @@ CREATE TABLE IF NOT EXISTS employee (
     status ENUM('working', 'bench', 'over_allocated') DEFAULT 'bench',
     allow_over_allocation BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_dob_month_day ((MONTH(date_of_birth)), (DAY(date_of_birth))),
     INDEX idx_doj (date_of_joining),
     INDEX idx_emp_status (status)
 );

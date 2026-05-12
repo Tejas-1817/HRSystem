@@ -1,4 +1,4 @@
-USE starterdata;
+USE hrms;
 
 INSERT IGNORE INTO employee (name, email, phone, id, salary, date_of_birth, date_of_joining) VALUES
 ('M_Tejas', 'tejas@gmail.com', 8362954547, '19950514', 65000.00, '1995-05-14', '2020-06-01'),
