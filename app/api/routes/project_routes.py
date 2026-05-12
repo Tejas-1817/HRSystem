@@ -3,8 +3,35 @@ from flask import Blueprint, request, jsonify
 from app.api.middleware.auth import token_required, role_required
 from app.utils.helpers import generate_project_id
 from app.services.billing_service import sync_employee_status
+import logging
 
+logger = logging.getLogger(__name__)
 project_bp = Blueprint('projects', __name__)
+
+
+def serialize_projects(rows):
+    """Convert datetime and decimal fields to JSON-serializable formats."""
+    if not rows:
+        return rows
+    
+    is_list = isinstance(rows, list)
+    items = rows if is_list else [rows]
+    
+    for item in items:
+        # Convert datetime/date fields to strings
+        date_fields = [
+            ("start_date", "startDate"),
+            ("end_date", "endDate"),
+            ("created_at", "createdAt"),
+            ("updated_at", "updatedAt")
+        ]
+        for snake, camel in date_fields:
+            if item.get(snake):
+                val = str(item[snake])
+                item[snake] = val
+                item[camel] = val
+    
+    return items if is_list else items[0]
 
 
 def _manager_join_clause():
@@ -143,10 +170,11 @@ def view_projects(current_user):
                     (current_user["employee_name"],),
                 )
 
-        return jsonify({"success": True, "projects": rows}), 200
+        return jsonify({"success": True, "projects": serialize_projects(rows)}), 200
 
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"Error fetching projects for {current_user['employee_name']}: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to fetch projects"}), 500
 
 
 @project_bp.route("/<int:project_id>", methods=["GET"])
@@ -197,12 +225,13 @@ def get_project(current_user, project_id):
                 "SELECT employee_name, assigned_by, assigned_at FROM project_assignments WHERE project_id=%s",
                 (project_id,),
             )
-            return jsonify({"success": True, "project": row}), 200
+            return jsonify({"success": True, "project": serialize_projects(row)}), 200
 
         return jsonify({"success": False, "error": "Project not found"}), 404
 
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"Error fetching project {project_id}: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to fetch project details"}), 500
 
 
 @project_bp.route("/", methods=["POST"])

@@ -1,7 +1,10 @@
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, jsonify
 from flask_cors import CORS
 from app.config import Config
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 def create_app():
     app = Flask(__name__)
@@ -17,6 +20,44 @@ def create_app():
     # Setup logging
     from app.utils.logger import setup_logger
     setup_logger()
+
+    # ── GLOBAL ERROR HANDLERS (Production-Safe) ──────────────────────────
+    @app.errorhandler(500)
+    def handle_500_error(error):
+        """Catch unhandled exceptions and return safe error response without stack trace."""
+        logger.error(f"500 Error: {error}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error",
+            "message": "An unexpected error occurred. Please contact support."
+        }), 500
+
+    @app.errorhandler(404)
+    def handle_404_error(error):
+        """Catch 404 errors."""
+        return jsonify({
+            "success": False,
+            "error": "Not found",
+            "message": "The requested resource does not exist."
+        }), 404
+
+    @app.errorhandler(403)
+    def handle_403_error(error):
+        """Catch 403 errors."""
+        return jsonify({
+            "success": False,
+            "error": "Forbidden",
+            "message": "You do not have permission to access this resource."
+        }), 403
+
+    @app.errorhandler(400)
+    def handle_400_error(error):
+        """Catch 400 errors."""
+        return jsonify({
+            "success": False,
+            "error": "Bad request",
+            "message": "The request contains invalid data."
+        }), 400
 
     # Register Blueprints
     from app.api.routes.auth_routes import auth_bp

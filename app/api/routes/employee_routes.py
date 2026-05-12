@@ -204,28 +204,40 @@ def get_employee(current_user, emp_id):
             WHERE e.id = %s
         """
         row = execute_single(query, (emp_id,))
-        if not row: return jsonify({"success": False, "error": "Employee not found"}), 404
+        if not row: 
+            return jsonify({"success": False, "error": "Employee not found"}), 404
+        
         if current_user["role"] == "employee" and row["name"] != current_user["employee_name"]:
             return jsonify({"success": False, "error": "Access denied"}), 403
+        
+        # ── Auto-allocate leaves if missing (graceful fallback) ────────
         if row.get("total_leaves") == 0:
-            from app.services.leave_service import allocate_default_leaves
-            has_records = execute_single("SELECT 1 FROM leave_balance WHERE employee_name = %s LIMIT 1", (row["name"],))
+            has_records = execute_single(
+                "SELECT 1 FROM leave_balance WHERE employee_name = %s LIMIT 1", 
+                (row["name"],)
+            )
             if not has_records:
-                allocate_default_leaves(row["name"])
-                # Refresh data
-                updated_lb = execute_single("""
-                    SELECT SUM(total_leaves) as total, SUM(used_leaves) as used, SUM(total_leaves - used_leaves) as remaining
-                    FROM leave_balance WHERE employee_name = %s
-                """, (row["name"],))
-                if updated_lb:
-                    row["total_leaves"] = updated_lb["total"]
-                    row["used_leaves"] = updated_lb["used"]
-                    row["remaining_leaves"] = updated_lb["remaining"]
+                try:
+                    from app.services.leave_service import allocate_default_leaves
+                    allocate_default_leaves(row["name"])
+                    # Refresh data after allocation
+                    updated_lb = execute_single("""
+                        SELECT SUM(total_leaves) as total, SUM(used_leaves) as used, 
+                               SUM(total_leaves - used_leaves) as remaining
+                        FROM leave_balance WHERE employee_name = %s
+                    """, (row["name"],))
+                    if updated_lb:
+                        row["total_leaves"] = updated_lb["total"] or 0
+                        row["used_leaves"] = updated_lb["used"] or 0
+                        row["remaining_leaves"] = updated_lb["remaining"] or 0
+                except Exception as alloc_error:
+                    logger.error(f"Failed to allocate leaves for {row['name']}: {alloc_error}")
+                    # Don't fail the endpoint — just log it
 
         return jsonify({"success": True, "employee": serialize_employee(row)}), 200
     except Exception as e:
         logger.error(f"Error fetching employee {emp_id}: {e}", exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Failed to fetch employee details"}), 500
 
 @employee_bp.route("/", methods=["POST"])
 @role_required(["hr"])
