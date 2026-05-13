@@ -60,6 +60,22 @@ def _notify(employee_name: str, title: str, message: str, notif_type: str = "lea
         logger.warning(f"Notification insert failed for {employee_name}: {e}")
 
 
+def _notify_role_users(role: str, title: str, message: str, notif_type: str = "leave", exclude: str | None = None) -> None:
+    """Best-effort broadcast notification to all active users of a role."""
+    try:
+        users = execute_query(
+            "SELECT employee_name FROM users WHERE role = %s AND is_active = TRUE",
+            (role,),
+        )
+        for u in users:
+            employee_name = u["employee_name"]
+            if exclude and employee_name == exclude:
+                continue
+            _notify(employee_name, title, message, notif_type)
+    except Exception as e:
+        logger.warning(f"Role notification failed for role={role}: {e}")
+
+
 def _write_approval_history(leave_id: int, action: str, actor: str, actor_role: str, reason: str = None) -> None:
     """Append one immutable row to leave_approval_history."""
     try:
@@ -97,6 +113,83 @@ def _get_stored_duration(leave: dict) -> Decimal:
     return Decimal(str(get_working_days_count(sd, ed)))
 
 
+def _manager_team_exists_clause() -> str:
+    """
+    SQL fragment that checks whether a leave row employee reports to the manager
+    through active project ownership.
+    """
+    return """
+        EXISTS (
+            SELECT 1
+            FROM project_assignments pa
+            JOIN projects p ON p.id = pa.project_id
+            WHERE pa.employee_name = l.employee_name
+              AND p.manager_name = %s
+              AND p.status NOT IN ('completed', 'closed', 'cancelled')
+        )
+    """
+
+
+def _build_visibility_clause(current_user: dict, include_self_for_manager: bool = True) -> tuple[str, list]:
+    """
+    Build RBAC WHERE clause for leave visibility.
+    Returns `(sql_clause, params)` without the `WHERE` keyword.
+    """
+    role = current_user["role"]
+    employee_name = current_user["employee_name"]
+
+    if role == "admin":
+        return "1=1", []
+
+    if role == "hr":
+        # HR can view all non-HR/non-admin leave requests org-wide.
+        return "l.requester_role NOT IN ('hr', 'admin')", []
+
+    if role == "manager":
+        team_clause = _manager_team_exists_clause()
+        if include_self_for_manager:
+            return f"(({team_clause}) OR l.employee_name = %s)", [employee_name, employee_name]
+        return f"({team_clause})", [employee_name]
+
+    # employee and fallback
+    return "l.employee_name = %s", [employee_name]
+
+
+def _can_view_leave(current_user: dict, leave_row: dict) -> bool:
+    """
+    Object-level RBAC check for single-leave access.
+    Mirrors _build_visibility_clause semantics.
+    """
+    role = current_user["role"]
+    if role == "admin":
+        return True
+
+    if role == "employee":
+        return leave_row["employee_name"] == current_user["employee_name"]
+
+    if role == "hr":
+        return leave_row.get("requester_role") not in ("hr", "admin")
+
+    if role == "manager":
+        if leave_row["employee_name"] == current_user["employee_name"]:
+            return True
+        row = execute_single(
+            """
+            SELECT 1 AS ok
+            FROM project_assignments pa
+            JOIN projects p ON p.id = pa.project_id
+            WHERE pa.employee_name = %s
+              AND p.manager_name = %s
+              AND p.status NOT IN ('completed', 'closed', 'cancelled')
+            LIMIT 1
+            """,
+            (leave_row["employee_name"], current_user["employee_name"]),
+        )
+        return bool(row)
+
+    return False
+
+
 # ---------------------------------------------------------------------------
 # GET /leaves/ — list leave applications
 # ---------------------------------------------------------------------------
@@ -105,41 +198,137 @@ def _get_stored_duration(leave: dict) -> Decimal:
 @token_required
 def view_leaves(current_user):
     try:
-        role = current_user["role"]
-        emp_name = current_user["employee_name"]
+        # Filtering + pagination (enterprise-safe defaults)
+        page = max(int(request.args.get("page", 1)), 1)
+        page_size = min(max(int(request.args.get("page_size", 20)), 1), 100)
+        offset = (page - 1) * page_size
 
-        if role == "admin":
-            # Admin sees everything
-            rows = execute_query("""
-                SELECT id, employee_name, leave_type, leave_type_category,
-                       half_day_period, leave_duration, start_date, end_date,
-                       reason, status, applied_at, requester_role
-                FROM leaves ORDER BY applied_at DESC
-            """)
-        elif role == "manager":
-            # Managers see employee leaves + their own
-            rows = execute_query("""
-                SELECT id, employee_name, leave_type, leave_type_category,
-                       half_day_period, leave_duration, start_date, end_date,
-                       reason, status, applied_at, requester_role
-                FROM leaves
-                WHERE requester_role = 'employee' 
-                   OR employee_name = %s
-                ORDER BY applied_at DESC
-            """, (emp_name,))
-        else:
-            # HR and Employees see only their own leaves in this view
-            # (HR uses /balance/all or other views for management)
-            rows = execute_query("""
-                SELECT id, employee_name, leave_type, leave_type_category,
-                       half_day_period, leave_duration, start_date, end_date,
-                       reason, status, applied_at, requester_role
-                FROM leaves
-                WHERE employee_name = %s ORDER BY applied_at DESC
-            """, (emp_name,))
+        filters = []
+        params: list = []
+
+        visibility_clause, visibility_params = _build_visibility_clause(current_user)
+        filters.append(visibility_clause)
+        params.extend(visibility_params)
+
+        status = request.args.get("status")
+        if status:
+            filters.append("l.status = %s")
+            params.append(status)
+
+        leave_type = request.args.get("leave_type")
+        if leave_type:
+            filters.append("l.leave_type = %s")
+            params.append(leave_type)
+
+        from_date = request.args.get("from_date")
+        if from_date:
+            filters.append("l.start_date >= %s")
+            params.append(from_date)
+
+        to_date = request.args.get("to_date")
+        if to_date:
+            filters.append("l.end_date <= %s")
+            params.append(to_date)
+
+        employee_name_filter = request.args.get("employee_name")
+        if employee_name_filter:
+            # Employees cannot pivot to others by query param.
+            if current_user["role"] == "employee" and employee_name_filter != current_user["employee_name"]:
+                return jsonify({"success": False, "error": "Access denied"}), 403
+            filters.append("l.employee_name = %s")
+            params.append(employee_name_filter)
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+
+        total_row = execute_single(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM leaves l
+            WHERE {where_clause}
+            """,
+            tuple(params),
+        )
+        total = int(total_row["total"]) if total_row else 0
+
+        rows = execute_query(
+            f"""
+            SELECT
+                l.id,
+                l.employee_name,
+                u.id AS employee_id,
+                l.leave_type,
+                l.leave_type_category,
+                l.half_day_period,
+                CAST(l.leave_duration AS FLOAT) AS total_days,
+                l.start_date,
+                l.end_date,
+                l.reason,
+                l.status,
+                l.applied_at,
+                l.requester_role,
+                l.approved_by,
+                l.approver_role,
+                l.approved_at,
+                l.rejection_reason
+            FROM leaves l
+            LEFT JOIN users u ON u.employee_name = l.employee_name
+            WHERE {where_clause}
+            ORDER BY l.applied_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            tuple(params + [page_size, offset]),
+        )
 
         rows = [_serialize_leave(r) for r in rows]
-        return jsonify({"success": True, "leaves": rows}), 200
+        return jsonify({
+            "success": True,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "leaves": rows,
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@leave_bp.route("/<int:leave_id>", methods=["GET"])
+@token_required
+def get_leave_by_id(current_user, leave_id):
+    """GET /leaves/{id} — fetch a single leave with object-level RBAC."""
+    try:
+        row = execute_single(
+            """
+            SELECT
+                l.id,
+                l.employee_name,
+                u.id AS employee_id,
+                l.leave_type,
+                l.leave_type_category,
+                l.half_day_period,
+                CAST(l.leave_duration AS FLOAT) AS total_days,
+                l.start_date,
+                l.end_date,
+                l.reason,
+                l.status,
+                l.applied_at,
+                l.requester_role,
+                l.approved_by,
+                l.approver_role,
+                l.approved_at,
+                l.rejection_reason
+            FROM leaves l
+            LEFT JOIN users u ON u.employee_name = l.employee_name
+            WHERE l.id = %s
+            """,
+            (leave_id,),
+        )
+        if not row:
+            return jsonify({"success": False, "error": "Leave request not found"}), 404
+
+        if not _can_view_leave(current_user, row):
+            return jsonify({"success": False, "error": "Access denied"}), 403
+
+        return jsonify({"success": True, "leave": _serialize_leave(row)}), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -274,17 +463,88 @@ def view_leave_config(current_user):
 @role_required(["manager", "hr"])
 def get_currently_on_leave(current_user):
     try:
-        rows = execute_query("""
-            SELECT id, employee_name, leave_type, leave_type_category,
-                   half_day_period, leave_duration, start_date, end_date,
-                   reason, status
-            FROM leaves
-            WHERE status = 'approved'
-              AND CURDATE() BETWEEN start_date AND end_date
-            ORDER BY employee_name
-        """)
+        if current_user["role"] == "manager":
+            rows = execute_query(f"""
+                SELECT id, employee_name, leave_type, leave_type_category,
+                       half_day_period, leave_duration, start_date, end_date,
+                       reason, status
+                FROM leaves l
+                WHERE status = 'approved'
+                  AND CURDATE() BETWEEN start_date AND end_date
+                  AND {_manager_team_exists_clause()}
+                ORDER BY employee_name
+            """, (current_user["employee_name"],))
+        else:
+            rows = execute_query("""
+                SELECT id, employee_name, leave_type, leave_type_category,
+                       half_day_period, leave_duration, start_date, end_date,
+                       reason, status
+                FROM leaves
+                WHERE status = 'approved'
+                  AND CURDATE() BETWEEN start_date AND end_date
+                ORDER BY employee_name
+            """)
         rows = [_serialize_leave(r) for r in rows]
         return jsonify({"success": True, "on_leave_today": rows}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@leave_bp.route("/analytics", methods=["GET"])
+@role_required(["manager", "hr", "admin"])
+def leave_analytics(current_user):
+    """Aggregated leave metrics for dashboard/reporting widgets."""
+    try:
+        filters = []
+        params: list = []
+
+        visibility_clause, visibility_params = _build_visibility_clause(
+            current_user, include_self_for_manager=False
+        )
+        filters.append(visibility_clause)
+        params.extend(visibility_params)
+
+        from_date = request.args.get("from_date")
+        to_date = request.args.get("to_date")
+        if from_date:
+            filters.append("l.start_date >= %s")
+            params.append(from_date)
+        if to_date:
+            filters.append("l.end_date <= %s")
+            params.append(to_date)
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+
+        by_status = execute_query(
+            f"""
+            SELECT l.status, COUNT(*) AS count
+            FROM leaves l
+            WHERE {where_clause}
+            GROUP BY l.status
+            """,
+            tuple(params),
+        )
+        by_type = execute_query(
+            f"""
+            SELECT l.leave_type, COUNT(*) AS count
+            FROM leaves l
+            WHERE {where_clause}
+            GROUP BY l.leave_type
+            ORDER BY count DESC
+            """,
+            tuple(params),
+        )
+        pending = execute_single(
+            f"SELECT COUNT(*) AS count FROM leaves l WHERE {where_clause} AND l.status = 'pending'",
+            tuple(params),
+        )
+
+        return jsonify({
+            "success": True,
+            "pending_approvals": int((pending or {}).get("count", 0)),
+            "by_status": {r["status"]: int(r["count"]) for r in by_status},
+            "by_leave_type": {r["leave_type"]: int(r["count"]) for r in by_type},
+        }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -435,6 +695,7 @@ def leave_calendar(current_user):
 # ---------------------------------------------------------------------------
 
 @leave_bp.route("/", methods=["POST"])
+@leave_bp.route("/apply", methods=["POST"])
 @token_required
 def apply_leave(current_user):
     """
@@ -625,6 +886,13 @@ def apply_leave(current_user):
                     f"from {start_date} to {end_date}. Awaiting your approval.",
                     "leave_pending",
                 )
+            # Also notify HR for org-wide planning visibility.
+            _notify_role_users(
+                "hr",
+                "Leave Request Pending Review",
+                f"{employee_name} has applied for {leave_type} leave from {start_date} to {end_date}.",
+                "leave_pending",
+            )
 
         period_label = ""
         if leave_type_category == "half_day":
@@ -648,7 +916,7 @@ def apply_leave(current_user):
 # PATCH /leaves/<id>/approve — manager/HR approves and deducts balance
 # ---------------------------------------------------------------------------
 
-@leave_bp.route("/<int:leave_id>/approve", methods=["PATCH"])
+@leave_bp.route("/<int:leave_id>/approve", methods=["PATCH", "PUT"])
 @token_required
 def approve_leave(current_user, leave_id):
     """Approve a pending leave application with RBAC enforcement."""
@@ -715,7 +983,7 @@ def approve_leave(current_user, leave_id):
 # PATCH /leaves/<id>/reject — manager/HR rejects a leave
 # ---------------------------------------------------------------------------
 
-@leave_bp.route("/<int:leave_id>/reject", methods=["PATCH"])
+@leave_bp.route("/<int:leave_id>/reject", methods=["PATCH", "PUT"])
 @token_required
 def reject_leave(current_user, leave_id):
     """Reject a pending leave with RBAC enforcement."""
@@ -836,13 +1104,15 @@ def update_leave_status_api(current_user, leave_id):
 def get_leave_history(current_user, leave_id):
     """Returns the approval history/audit trail for a specific leave application."""
     try:
-        leave = execute_single("SELECT employee_name FROM leaves WHERE id = %s", (leave_id,))
+        leave = execute_single(
+            "SELECT employee_name, requester_role FROM leaves WHERE id = %s",
+            (leave_id,),
+        )
         if not leave:
             return jsonify({"success": False, "error": "Leave not found"}), 404
-            
-        # RBAC: requester, their manager, or admin can view history
-        if current_user["role"] not in ("admin", "manager") and current_user["employee_name"] != leave["employee_name"]:
-             return jsonify({"success": False, "error": "Access denied"}), 403
+
+        if not _can_view_leave(current_user, leave):
+            return jsonify({"success": False, "error": "Access denied"}), 403
 
         rows = execute_query("""
             SELECT action, actor, actor_role, reason, created_at
