@@ -81,7 +81,10 @@ python database/migrations/run_001.py   # Half‑day leave
 python database/migrations/run_002.py   # Help Desk
 python database/migrations/run_003.py   # Reimbursements
 python database/migrations/run_004.py   # Token blacklist
-# add further migrations as they appear
+python database/migrations/run_006.py   # Device management + helpdesk device link
+python database/migrations/run_009.py   # Timesheet approval workflow
+python database/migrations/run_010.py   # Inventory & stock management
+python database/migrations/run_011.py   # Leave approval workflow
 ```
 
 ### 5. Run the Server
@@ -138,6 +141,10 @@ python database/migrations/run_001.py
 python database/migrations/run_002.py
 python database/migrations/run_003.py
 python database/migrations/run_004.py
+python database/migrations/run_006.py
+python database/migrations/run_009.py
+python database/migrations/run_010.py
+python database/migrations/run_011.py
 ```
 
 ---
