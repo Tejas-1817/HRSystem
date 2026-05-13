@@ -222,7 +222,7 @@ def get_project(current_user, project_id):
 
         if row:
             row["team_members"] = execute_query(
-                "SELECT employee_name, assigned_by, assigned_at FROM project_assignments WHERE project_id=%s",
+                "SELECT employee_name, is_billable, billable_percentage, assigned_by, assigned_at FROM project_assignments WHERE project_id=%s",
                 (project_id,),
             )
             return jsonify({"success": True, "project": serialize_projects(row)}), 200
