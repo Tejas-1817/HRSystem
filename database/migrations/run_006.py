@@ -28,7 +28,7 @@ def _split_statements(sql_text: str) -> list[str]:
     statements = []
     for stmt in full_text.split(";"):
         stmt = stmt.strip()
-        if stmt and stmt.upper() not in ("", "USE STARTERDATA"):
+        if stmt and stmt.upper() not in ("", "USE hrms"):
             statements.append(stmt)
     return statements
 
@@ -40,9 +40,9 @@ def run():
 
     conn = mysql.connector.connect(
         host=os.getenv("DB_HOST", "localhost"),
-        user=os.getenv("DB_USER", "root"),
-        password=os.getenv("DB_PASS", ""),
-        database=os.getenv("DB_NAME", "starterdata"),
+        user=os.getenv("DB_USER", "hrmsuser"),
+        password=os.getenv("DB_PASS", "Altzor@123"),
+        database=os.getenv("DB_NAME", "hrms"),
         port=int(os.getenv("DB_PORT", 3306)),
     )
     cursor = conn.cursor()

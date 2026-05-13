@@ -1,7 +1,7 @@
 -- Migration 004: Secure Role Management
 -- Adds role column to employee and creates role history table
 
-USE starterdata;
+USE hrms;
 
 -- 1. Add role column to employee table
 ALTER TABLE employee 

@@ -6,7 +6,7 @@
 -- Idempotent: uses ALTER IGNORE / IF NOT EXISTS so re-running is safe.
 -- =============================================================================
 
-USE starterdata;
+USE hrms;
 
 -- ── Step 1: Add audit & hierarchy columns to `leaves` ──────────────────────
 

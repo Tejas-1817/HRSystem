@@ -6,7 +6,7 @@
 -- All statements are idempotent (IF NOT EXISTS / dynamic column checks).
 -- ============================================================================
 
-USE starterdata;
+USE hrms;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. asset_catalog: SKU-level metadata for grouping and purchase tracking
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS asset_catalog (
 
 -- catalog_id: link to asset_catalog
 SET @col = (SELECT COUNT(*) FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'catalog_id');
+            WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'catalog_id');
 SET @sql = IF(@col = 0,
     'ALTER TABLE devices ADD COLUMN catalog_id INT NULL AFTER updated_at',
     'SELECT 1');
@@ -41,7 +41,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- purchase_date
 SET @col = (SELECT COUNT(*) FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'purchase_date');
+            WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'purchase_date');
 SET @sql = IF(@col = 0,
     'ALTER TABLE devices ADD COLUMN purchase_date DATE NULL AFTER catalog_id',
     'SELECT 1');
@@ -49,7 +49,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- warranty_expiry
 SET @col = (SELECT COUNT(*) FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'warranty_expiry');
+            WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'warranty_expiry');
 SET @sql = IF(@col = 0,
     'ALTER TABLE devices ADD COLUMN warranty_expiry DATE NULL AFTER purchase_date',
     'SELECT 1');
@@ -57,7 +57,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- condition_notes
 SET @col = (SELECT COUNT(*) FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'condition_notes');
+            WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'condition_notes');
 SET @sql = IF(@col = 0,
     'ALTER TABLE devices ADD COLUMN condition_notes TEXT NULL AFTER warranty_expiry',
     'SELECT 1');
@@ -65,7 +65,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- location
 SET @col = (SELECT COUNT(*) FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'location');
+            WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'location');
 SET @sql = IF(@col = 0,
     'ALTER TABLE devices ADD COLUMN location VARCHAR(100) NULL DEFAULT ''HQ'' AFTER condition_notes',
     'SELECT 1');
@@ -73,7 +73,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- Foreign key (skip if already exists)
 SET @fk = (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
-           WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'devices' AND CONSTRAINT_NAME = 'fk_device_catalog');
+           WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'devices' AND CONSTRAINT_NAME = 'fk_device_catalog');
 SET @sql = IF(@fk = 0,
     'ALTER TABLE devices ADD CONSTRAINT fk_device_catalog FOREIGN KEY (catalog_id) REFERENCES asset_catalog(id) ON DELETE SET NULL',
     'SELECT 1');
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS asset_stock_log (
 -- 5. Index for device_type filtering (if not present)
 -- ─────────────────────────────────────────────────────────────────────────────
 SET @idx = (SELECT COUNT(*) FROM information_schema.STATISTICS
-            WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'devices' AND INDEX_NAME = 'idx_device_type');
+            WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'devices' AND INDEX_NAME = 'idx_device_type');
 SET @sql = IF(@idx = 0,
     'ALTER TABLE devices ADD INDEX idx_device_type (device_type)',
     'SELECT 1');

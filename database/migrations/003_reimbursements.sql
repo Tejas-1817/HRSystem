@@ -4,7 +4,7 @@
 -- Safe        : Uses CREATE TABLE IF NOT EXISTS — idempotent.
 -- =============================================================================
 
-USE starterdata;
+USE hrms;
 
 -- ---------------------------------------------------------------------------
 -- Table 1: reimbursements

@@ -13,9 +13,9 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
 import mysql.connector
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
-DB_NAME = os.getenv("DB_NAME", "starterdata")
-DB_USER = os.getenv("DB_USER", "tejas")
-DB_PASS = os.getenv("DB_PASS", "password123")
+DB_NAME = os.getenv("DB_NAME", "hrms")
+DB_USER = os.getenv("DB_USER", "hrmsuser")
+DB_PASS = os.getenv("DB_PASS", "Altzor@123")
 
 STEPS = [
     (

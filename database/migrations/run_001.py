@@ -15,9 +15,9 @@ load_dotenv()
 import mysql.connector
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
-DB_NAME = os.getenv("DB_NAME", "starterdata")
-DB_USER = os.getenv("DB_USER",  "tejas")
-DB_PASS = os.getenv("DB_PASS",  "password123")
+DB_NAME = os.getenv("DB_NAME", "hrms")
+DB_USER = os.getenv("DB_USER",  "hrmsuser")
+DB_PASS = os.getenv("DB_PASS",  "Altzor@123")
 
 def _col_exists(cursor, table: str, column: str, db: str) -> bool:
     """Check if a column exists in a table (compatible with all MySQL versions)."""

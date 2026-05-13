@@ -8,13 +8,13 @@ load_dotenv()
 
 def _split(sql):
     lines = [re.sub(r'--.*$', '', l) for l in sql.splitlines() if not l.strip().startswith('--')]
-    return [s.strip() for s in '\n'.join(lines).split(';') if s.strip() and s.strip().upper() != 'USE STARTERDATA']
+    return [s.strip() for s in '\n'.join(lines).split(';') if s.strip() and s.strip().upper() != 'USE hrms']
 
 def run():
     with open(os.path.join(os.path.dirname(__file__), '010_inventory_management.sql')) as f:
         sql = f.read()
-    conn = mysql.connector.connect(host=os.getenv('DB_HOST','localhost'), user=os.getenv('DB_USER','root'),
-                                    password=os.getenv('DB_PASS',''), database=os.getenv('DB_NAME','starterdata'))
+    conn = mysql.connector.connect(host=os.getenv('DB_HOST','localhost'), user=os.getenv('DB_USER','hrmsuser'),
+                                    password=os.getenv('DB_PASS','Altzor@123'), database=os.getenv('DB_NAME','hrms'))
     cur = conn.cursor()
     print("🚀 Running Migration 010: Device Inventory & Stock Management ...")
     stmts, done = _split(sql), 0

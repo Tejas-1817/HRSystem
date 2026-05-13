@@ -6,7 +6,7 @@
 -- Safe        : Uses ADD COLUMN IF NOT EXISTS and MODIFY so it is idempotent.
 -- =============================================================================
 
-USE starterdata;
+USE hrms;
 
 -- ---------------------------------------------------------------------------
 -- Step 1: Add half-day columns to `leaves`

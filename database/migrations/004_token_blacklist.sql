@@ -2,7 +2,7 @@
 -- Description: Stores invalidated JWT hashes to prevent reuse after logout.
 -- Author: Senior Security Engineer
 
-USE starterdata;
+USE hrms;
 
 CREATE TABLE IF NOT EXISTS token_blacklist (
     id INT AUTO_INCREMENT PRIMARY KEY,

@@ -2,7 +2,7 @@
 -- Adds approval audit columns to timesheets and creates timesheet_approval_history table.
 -- Safe to re-run: all statements are idempotent (IF NOT EXISTS / IGNORE).
 
-USE starterdata;
+USE hrms;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. Extend timesheets ENUM to include 'pending' (some seed rows already use it)
@@ -16,7 +16,7 @@ ALTER TABLE timesheets
 
 -- owner_role: cached role of the timesheet submitter at time of creation
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
-                   WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'owner_role');
+                   WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'owner_role');
 SET @sql = IF(@col_exists = 0,
     'ALTER TABLE timesheets ADD COLUMN owner_role VARCHAR(50) NULL AFTER employee_name',
     'SELECT 1');
@@ -24,7 +24,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- approved_by: employee_name of the person who approved/rejected
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
-                   WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'approved_by');
+                   WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'approved_by');
 SET @sql = IF(@col_exists = 0,
     'ALTER TABLE timesheets ADD COLUMN approved_by VARCHAR(100) NULL AFTER manager_name',
     'SELECT 1');
@@ -32,7 +32,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- approver_role: role of the approver at time of action
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
-                   WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'approver_role');
+                   WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'approver_role');
 SET @sql = IF(@col_exists = 0,
     'ALTER TABLE timesheets ADD COLUMN approver_role VARCHAR(50) NULL AFTER approved_by',
     'SELECT 1');
@@ -40,7 +40,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- approved_at: timestamp of approval/rejection action
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
-                   WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'approved_at');
+                   WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'approved_at');
 SET @sql = IF(@col_exists = 0,
     'ALTER TABLE timesheets ADD COLUMN approved_at TIMESTAMP NULL AFTER approver_role',
     'SELECT 1');
@@ -48,7 +48,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- rejection_reason: detailed reason when rejected
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
-                   WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'rejection_reason');
+                   WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'timesheets' AND COLUMN_NAME = 'rejection_reason');
 SET @sql = IF(@col_exists = 0,
     'ALTER TABLE timesheets ADD COLUMN rejection_reason TEXT NULL AFTER approved_at',
     'SELECT 1');
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS timesheet_approval_history (
 -- 6. Add index for owner_role queries (if not already present)
 -- ─────────────────────────────────────────────────────────────────────────────
 SET @idx_exists = (SELECT COUNT(*) FROM information_schema.STATISTICS
-                   WHERE TABLE_SCHEMA = 'starterdata' AND TABLE_NAME = 'timesheets' AND INDEX_NAME = 'idx_ts_owner_role');
+                   WHERE TABLE_SCHEMA = 'hrms' AND TABLE_NAME = 'timesheets' AND INDEX_NAME = 'idx_ts_owner_role');
 SET @sql = IF(@idx_exists = 0,
     'ALTER TABLE timesheets ADD INDEX idx_ts_owner_role (owner_role)',
     'SELECT 1');
