@@ -1,3 +1,15 @@
+"""
+Employee API Routes (Backward Compatibility)
+
+DEPRECATION NOTICE: New endpoints use /api/v1/team-members
+This module maintains /api/v1/employees endpoints for legacy compatibility.
+
+All functions maintain backward compatibility while using modern terminology
+internally. The serializers support both old and new field naming conventions.
+
+For new development, prefer: app.api.routes.team_member_routes
+"""
+
 from flask import Blueprint, request, jsonify
 import os
 import re
@@ -7,50 +19,74 @@ from app.config import Config
 from app.models.database import execute_query, execute_single, Transaction
 from app.api.middleware.auth import token_required, role_required
 from app.services.employee_service import create_employee_record, update_employee_role
+from app.config.terminology import get_message
 import mysql.connector
 
 logger = logging.getLogger(__name__)
 employee_bp = Blueprint('employees', __name__)
 
 def serialize_employee(rows):
-    """Convert date, datetime, and decimal fields to serializable formats with camelCase aliases."""
-    if not rows: return rows
+    """
+    Convert database records to API response format.
+    
+    Maintains backward compatibility with both old and new field naming.
+    Supports dual naming: both snake_case database fields and camelCase API fields.
+    """
+    if not rows: 
+        return rows
+    
     is_list = isinstance(rows, list)
     items = rows if is_list else [rows]
+    
     for item in items:
-        # Dates to Strings + CamelCase aliases
-        date_fields = [("date_of_birth", "birthDate"), ("date_of_joining", "joiningDate"), ("created_at", "createdAt")]
+        # ─────────────────────────────────────────────────────────────────
+        # Date Fields → ISO String + camelCase aliases
+        # ─────────────────────────────────────────────────────────────────
+        date_fields = [
+            ("date_of_birth", "birthDate"), 
+            ("date_of_joining", "joiningDate"), 
+            ("created_at", "createdAt"),
+            ("updated_at", "updatedAt"),
+            ("deleted_at", "deletedAt")
+        ]
         for snake, camel in date_fields:
             if item.get(snake):
                 val = str(item[snake])
                 item[snake] = val
                 item[camel] = val
         
-        # Numbers to Float/Int + CamelCase aliases
-        # We keep leaves as int if they have no decimal part, otherwise float
+        # ─────────────────────────────────────────────────────────────────
+        # Numeric Fields → Float/Int + camelCase aliases
+        # ─────────────────────────────────────────────────────────────────
         numeric_fields = [
             ("salary", "salary", float),
             ("total_leaves", "totalLeaves", float),
             ("used_leaves", "usedLeaves", float),
             ("remaining_leaves", "remainingLeaves", float),
             ("total_utilization", "totalUtilization", float),
-            ("remaining_availability", "remainingAvailability", float)
+            ("remaining_availability", "remainingAvailability", float),
+            ("billable_percentage", "billablePercentage", int)
         ]
         for snake, camel, type_fn in numeric_fields:
             if item.get(snake) is not None:
-                val = type_fn(item[snake])
-                item[snake] = val
-                item[camel] = val
+                try:
+                    val = type_fn(item[snake])
+                    item[snake] = val
+                    item[camel] = val
+                except (ValueError, TypeError):
+                    pass  # Skip conversion if invalid
                 
-        # Boolean handling
+        # ─────────────────────────────────────────────────────────────────
+        # Boolean Fields → camelCase aliases
+        # ─────────────────────────────────────────────────────────────────
         if "allow_over_allocation" in item:
             val = bool(item["allow_over_allocation"])
             item["allow_over_allocation"] = val
             item["allowOverAllocation"] = val
 
-        # Photo URL: expose as photo_url for frontend consumption
-        # The raw 'photo' field stores the relative path (e.g. /uploads/photos/uuid.jpg)
-        # which is directly usable as a URL when the backend serves /uploads/
+        # ─────────────────────────────────────────────────────────────────
+        # Photo URL Field
+        # ─────────────────────────────────────────────────────────────────
         photo = item.get("photo")
         item["photo_url"] = photo if photo else None
             
@@ -66,14 +102,14 @@ def update_allocation_config(current_user, emp_id):
     try:
         data = request.get_json()
         if "allow_over_allocation" not in data:
-            return jsonify({"success": False, "error": "Missing field: allow_over_allocation"}), 400
+            return jsonify({"success": False, "error": get_message("required_field", field="allow_over_allocation")}), 400
         
         allow_val = bool(data["allow_over_allocation"])
         
         # 1. Fetch employee to check existence
         employee = execute_single("SELECT name FROM employee WHERE id = %s", (emp_id,))
         if not employee:
-            return jsonify({"success": False, "error": "Employee not found"}), 404
+            return jsonify({"success": False, "error": get_message("not_found")}), 404
         
         # 2. Update config
         execute_query(
@@ -85,13 +121,13 @@ def update_allocation_config(current_user, emp_id):
         # 3. Audit Logging
         execute_query(
             "INSERT INTO audit_logs (user_id, event_type, description) VALUES (%s, %s, %s)",
-            (current_user["user_id"], "config_change", f"HR/Mgr {current_user['employee_name']} {'enabled' if allow_val else 'disabled'} over-allocation for {employee['name']}"),
+            (current_user["user_id"], "config_change", f"HR/Manager {current_user['employee_name']} {'enabled' if allow_val else 'disabled'} over-allocation for {employee['name']}"),
             commit=True
         )
         
         return jsonify({
             "success": True, 
-            "message": f"Over-allocation configuration updated for {employee['name']}",
+            "message": get_message("updated_success"),
             "allow_over_allocation": allow_val
         }), 200
         
@@ -205,7 +241,7 @@ def get_employee(current_user, emp_id):
         """
         row = execute_single(query, (emp_id,))
         if not row: 
-            return jsonify({"success": False, "error": "Employee not found"}), 404
+            return jsonify({"success": False, "error": get_message("not_found")}), 404
         
         if current_user["role"] == "employee" and row["name"] != current_user["employee_name"]:
             return jsonify({"success": False, "error": "Access denied"}), 403

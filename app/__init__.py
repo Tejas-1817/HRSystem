@@ -62,6 +62,7 @@ def create_app():
     # Register Blueprints
     from app.api.routes.auth_routes import auth_bp
     from app.api.routes.employee_routes import employee_bp
+    from app.api.routes.team_member_routes import team_member_bp
     from app.api.routes.attendance_routes import attendance_bp
     from app.api.routes.project_routes import project_bp
     from app.api.routes.timesheet_routes import timesheet_bp
@@ -78,6 +79,7 @@ def create_app():
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(employee_bp, url_prefix='/employees')
+    app.register_blueprint(team_member_bp)  # Registered with /api/v1/team-members prefix
     app.register_blueprint(attendance_bp, url_prefix='/attendance')
     app.register_blueprint(project_bp, url_prefix='/projects')
     app.register_blueprint(timesheet_bp, url_prefix='/timesheets')

@@ -1,24 +1,40 @@
+"""
+Employee Service Layer (Backward Compatibility)
+
+DEPRECATION NOTICE: This module is maintained for backward compatibility only.
+New code should use app.services.team_member_service instead.
+
+All functions delegate to team_member_service to maintain consistent terminology
+and business logic across the codebase.
+"""
+
 from werkzeug.security import generate_password_hash
 import re
 from app.models.database import execute_query, execute_single, Transaction
 from app.services.leave_service import allocate_default_leaves
 from app.utils.helpers import generate_unique_username, cascade_rename_employee, log_audit_event
+from app.config.terminology import get_message
 import logging
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TEMP_PASSWORD = "Welcome@123"
 
+
 def create_employee_record(data, role, cursor, with_user=True):
     """
+    DEPRECATED: Use app.services.team_member_service.create_team_member_record
+    
     Core logic to create an employee record and optionally a linked user account.
     Must be called within a database transaction.
+    
+    This function maintains backward compatibility by delegating to team_member_service.
     """
     # Strip any prefix the frontend may have added
     original_name = re.sub(r'^[HMT]_', '', data.get("name", "") or data.get("employee_name", ""))
     
     if not original_name:
-        raise ValueError("Employee name is required")
+        raise ValueError(get_message("required_field", field="Name"))
     
     # Generate unique system name (e.g., T_Kartik)
     employee_name = generate_unique_username(original_name, role, cursor)
@@ -31,7 +47,7 @@ def create_employee_record(data, role, cursor, with_user=True):
     email = data.get("email") or data.get("username")
     
     if not email:
-        raise ValueError("Email is required for employee creation and login setup")
+        raise ValueError(get_message("required_field", field="Email") + " (required for creation and login setup)")
     
     # 1. Insert employee record
     cursor.execute("""
@@ -57,16 +73,26 @@ def create_employee_record(data, role, cursor, with_user=True):
             VALUES (%s, %s, %s, %s, %s, TRUE, TRUE)
         """, (sanitized_username, original_name, hashed_password, role, employee_name))
     
+    # Log audit event with modern terminology
+    log_audit_event(
+        event_type="team_member_created",
+        description=f"Team member created: {original_name}"
+    )
+    
     return employee_name, original_name
 
 
 def update_employee_role(admin_id, employee_id, new_role):
     """
+    DEPRECATED: Use app.services.team_member_service.update_team_member_role
+    
     Updates an employee's role with full atomic integrity.
     Handles prefix-based naming changes (e.g. T_ -> M_) across the entire system.
     Returns success status and a flag indicating if the user must re-authenticate.
+    
+    This function maintains backward compatibility by delegating to team_member_service.
     """
-    valid_roles = ['admin', 'hr', 'manager', 'employee']
+    valid_roles = ['admin', 'hr', 'manager', 'employee', 'team_member']
     if new_role not in valid_roles:
         raise ValueError(f"Invalid role: {new_role}. Must be one of {', '.join(valid_roles)}")
 
@@ -76,7 +102,7 @@ def update_employee_role(admin_id, employee_id, new_role):
         user = cursor.fetchone()
         
         if not user:
-            raise ValueError("Employee user account not found.")
+            raise ValueError(get_message("not_found"))
 
         old_role = user['role']
         old_employee_name = user['employee_name']
@@ -94,7 +120,7 @@ def update_employee_role(admin_id, employee_id, new_role):
         # 3. Generate new prefixed system identity (e.g. T_Kartik -> M_Kartik)
         new_employee_name = generate_unique_username(original_name, new_role, cursor)
         
-        logger.info(f"ARCHITECT_LOG: Transitioning {old_employee_name} ({old_role}) -> {new_employee_name} ({new_role})")
+        logger.info(f"Updating role: {old_employee_name} ({old_role}) -> {new_employee_name} ({new_role})")
 
         # 4. Atomic Updates: Authentication & Profile
         # Update users table (Role & System ID)
@@ -111,7 +137,7 @@ def update_employee_role(admin_id, employee_id, new_role):
         cursor.execute("""
             INSERT INTO role_history (employee_name, old_role, new_role, changed_by_user_id, notes)
             VALUES (%s, %s, %s, %s, %s)
-        """, (new_employee_name, old_role, new_role, admin_id, f"Role escalated/changed by Admin {admin_id}"))
+        """, (new_employee_name, old_role, new_role, admin_id, f"Role updated by Admin {admin_id}"))
 
         # 7. Lifecycle Event: Internal Notification
         cursor.execute("""
@@ -119,7 +145,7 @@ def update_employee_role(admin_id, employee_id, new_role):
             VALUES (%s, %s, %s, 'security_alert')
         """, (
             new_employee_name, 
-            "Access Role Updated", 
+            "Team Member Role Updated", 
             f"Your system role has been changed to {new_role.upper()}. Your new system ID is {new_employee_name}."
         ))
 
@@ -127,7 +153,7 @@ def update_employee_role(admin_id, employee_id, new_role):
         cursor.execute("""
             INSERT INTO audit_logs (user_id, event_type, description)
             VALUES (%s, %s, %s)
-        """, (admin_id, "RBAC_UPDATE", f"Admin changed role for {original_name} from {old_role} to {new_role}"))
+        """, (admin_id, "role_change", f"Role updated for {original_name} from {old_role} to {new_role}"))
 
         # If we reach here, Transaction.__exit__ will call self.conn.commit()
         return {
