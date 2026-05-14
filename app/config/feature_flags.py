@@ -1,21 +1,18 @@
 """
-Feature Flag Configuration
-===========================
-Centralized, enterprise-grade feature toggle management.
+Feature Flags — Centralized Feature Toggle Configuration
 
-Controls which system capabilities are currently enabled or disabled
-without requiring code deployments. Flip a flag here and the entire
-backend enforces the change immediately.
+Provides a single control point for enabling or disabling HRMS features.
+Each flag can be overridden at runtime via environment variables so that
+no code deployment is required to change system behaviour.
 
 Usage:
-    from app.config.feature_flags import FeatureFlags, is_bank_editable
+    from app.config.feature_flags import FeatureFlags
 
-    if not is_bank_editable():
-        # block the mutation
-        ...
+    if not FeatureFlags.BANK_DETAILS_EDITABLE:
+        # block mutation ...
 
-To re-enable bank-detail editing in the future, set:
-    BANK_DETAILS_EDITABLE = True
+Future flags follow the same pattern — add to FeatureFlags, wire env var,
+document below. Never hard-code feature state inside route handlers.
 """
 
 import os
@@ -26,60 +23,41 @@ logger = logging.getLogger(__name__)
 
 class FeatureFlags:
     """
-    Global feature-flag registry.
+    Enterprise feature-flag registry.
 
-    All flags here are the single source of truth for feature availability
-    across the entire backend. No scattered if-statements in business logic
-    — import from here and use the helper functions below.
+    Each attribute maps directly to an environment variable of the same name.
+    Default values represent the safe / locked production state.
 
-    ─────────────────────────────────────────────────────────────────────
-    BANK DETAILS PROTECTION
-    ─────────────────────────────────────────────────────────────────────
-    BANK_DETAILS_EDITABLE:
-        False  → All create / update / delete operations on bank_details
-                 are blocked for EVERY role (including admin/hr).
-                 View (GET) endpoints remain fully functional.
-        True   → Normal CRUD behaviour is restored.
+    ┌─────────────────────────────┬───────────┬──────────────────────────────────────┐
+    │ Flag                        │ Default   │ Purpose                              │
+    ├─────────────────────────────┼───────────┼──────────────────────────────────────┤
+    │ BANK_DETAILS_EDITABLE       │ False     │ Allow / block bank detail mutations  │
+    └─────────────────────────────┴───────────┴──────────────────────────────────────┘
 
-    Compliance note: Set to False whenever an external audit, payroll
-    freeze, or regulatory review is in progress. Any mutation attempt
-    while False is logged to audit_logs automatically.
+    To unlock bank editing without a code change:
+        Set environment variable:  BANK_DETAILS_EDITABLE=true
+        Then restart the application server.
     """
 
-    # ── Bank Details ───────────────────────────────────────────────────
-    BANK_DETAILS_EDITABLE: bool = False  # <── MASTER SWITCH
+    # ─────────────────────────────────────────────────────────────────────────
+    # Bank Details Protection
+    # ─────────────────────────────────────────────────────────────────────────
+    BANK_DETAILS_EDITABLE: bool = (
+        os.getenv("BANK_DETAILS_EDITABLE", "false").strip().lower() == "true"
+    )
 
-    # ── (Reserved) Future feature flags ───────────────────────────────
-    # SALARY_EDITABLE: bool = True
-    # LEAVE_POLICY_EDITABLE: bool = True
-    # TIMESHEET_EDITABLE: bool = True
-
-
-# ---------------------------------------------------------------------------
-# Public helper functions — import these in routes / services
-# ---------------------------------------------------------------------------
-
-def is_bank_editable() -> bool:
-    """
-    Returns True when bank-detail mutations are currently permitted.
-
-    Also supports an environment-variable override so you can toggle
-    the flag without a code change during hotfixes:
-
-        HRMS_BANK_EDITABLE=true  →  override to True
-        HRMS_BANK_EDITABLE=false →  override to False  (default)
-
-    The env-var always wins over the class constant.
-    """
-    env_override = os.environ.get("HRMS_BANK_EDITABLE", "").strip().lower()
-    if env_override in ("1", "true", "yes"):
-        logger.debug("FeatureFlag: BANK_DETAILS_EDITABLE overridden to True via env var.")
-        return True
-    if env_override in ("0", "false", "no"):
-        logger.debug("FeatureFlag: BANK_DETAILS_EDITABLE overridden to False via env var.")
-        return False
-    return FeatureFlags.BANK_DETAILS_EDITABLE
+    # ─────────────────────────────────────────────────────────────────────────
+    # Future flags — add here, never inside route handlers
+    # ─────────────────────────────────────────────────────────────────────────
+    # SALARY_EDITABLE: bool = os.getenv("SALARY_EDITABLE", "true").strip().lower() == "true"
+    # DOCUMENTS_UPLOAD_ENABLED: bool = os.getenv("DOCUMENTS_UPLOAD_ENABLED", "true") ...
 
 
-# Convenience constant for direct reads (refreshed at module load time only)
-BANK_DETAILS_EDITABLE = FeatureFlags.BANK_DETAILS_EDITABLE
+# ─────────────────────────────────────────────────────────────────────────────
+# Emit resolved flag values at import time so they appear in startup logs.
+# This helps ops teams confirm which flags are active without grepping code.
+# ─────────────────────────────────────────────────────────────────────────────
+logger.info(
+    "[FeatureFlags] Resolved → BANK_DETAILS_EDITABLE=%s",
+    FeatureFlags.BANK_DETAILS_EDITABLE,
+)
