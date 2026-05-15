@@ -76,6 +76,7 @@ def create_app():
     from app.api.routes.helpdesk_routes import helpdesk_bp
     from app.api.routes.reimbursement_routes import reimbursement_bp
     from app.api.routes.device_routes import device_bp
+    from app.api.routes.profile_routes import profile_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(employee_bp, url_prefix='/employees')
@@ -93,6 +94,7 @@ def create_app():
     app.register_blueprint(helpdesk_bp, url_prefix='/helpdesk')
     app.register_blueprint(reimbursement_bp, url_prefix='/reimbursements')
     app.register_blueprint(device_bp, url_prefix='/devices')
+    app.register_blueprint(profile_bp)  # /profile/<employee_name> — team member profile pages
 
     @app.after_request
     def add_security_headers(response):
