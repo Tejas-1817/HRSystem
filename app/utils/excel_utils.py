@@ -26,7 +26,7 @@ def generate_timesheet_excel(employee_name, timesheets):
     ws.title = "Timesheet Data"
     
     headers = [
-        "Employee Name", "Project Name", "Task", "Description", 
+        "Employee Name", "Project Name", "Manager Name", "Task", "Description", 
         "Date", "Hours Worked", "Billable Status"
     ]
     
@@ -51,6 +51,7 @@ def generate_timesheet_excel(employee_name, timesheets):
         row_data = [
             ts.get("employee_name", employee_name),
             project,
+            ts.get("manager_name", "N/A"),
             ts.get("task", "N/A"),
             ts.get("description", ""),
             ts.get("start_date").isoformat() if hasattr(ts.get("start_date"), "isoformat") else str(ts.get("start_date")),
