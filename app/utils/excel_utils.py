@@ -62,7 +62,7 @@ def generate_timesheet_excel(employee_name, timesheets):
         for col_num, value in enumerate(row_data, 1):
             cell = ws.cell(row=row_num, column=col_num, value=value)
             cell.border = border
-            if col_num == 6:  # Hours column
+            if col_num == 7:  # Hours column
                 cell.alignment = Alignment(horizontal="right")
         
         # Aggregation for summary

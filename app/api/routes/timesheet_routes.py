@@ -990,24 +990,29 @@ def export_timesheets(current_user):
             emp_name = request.args.get("employee_name", current_user["employee_name"])
 
         # Base query
-        query = "SELECT * FROM timesheets WHERE employee_name = %s"
+        query = """
+            SELECT t.*, p.manager_name AS proj_manager_name 
+            FROM timesheets t
+            LEFT JOIN projects p ON t.project = p.name
+            WHERE t.employee_name = %s
+        """
         params = [emp_name]
 
         # Apply dynamic filters
         if start_date_str:
-            query += " AND start_date >= %s"
+            query += " AND t.start_date >= %s"
             params.append(start_date_str)
         if end_date_str:
-            query += " AND start_date <= %s"
+            query += " AND t.start_date <= %s"
             params.append(end_date_str)
         if project:
-            query += " AND project = %s"
+            query += " AND t.project = %s"
             params.append(project)
         if status:
-            query += " AND status = %s"
+            query += " AND t.status = %s"
             params.append(status)
 
-        query += " ORDER BY start_date DESC"
+        query += " ORDER BY t.start_date DESC"
         
         # Fetch data
         rows = execute_query(query, tuple(params))
@@ -1017,6 +1022,11 @@ def export_timesheets(current_user):
                 "success": False, 
                 "error": f"No timesheet entries found for {emp_name} with the selected filters."
             }), 404
+
+        # Populate resolved manager_name for timesheet rows
+        for r in rows:
+            if not r.get("manager_name"):
+                r["manager_name"] = r.get("proj_manager_name") or "N/A"
 
         # Generate Excel using utility
         from app.utils.excel_utils import generate_timesheet_excel

@@ -8,7 +8,7 @@ BASE_URL = f"http://localhost:{os.getenv('PORT', 5001)}"
 
 def test_export():
     # 1. Login
-    login_data = {"username": "kartik@gmail.com", "password": "Kartik@123"}
+    login_data = {"username": "raj@gmail.com", "password": "Raj@123"}
     resp = requests.post(f"{BASE_URL}/auth/login", json=login_data)
     if resp.status_code != 200:
         print(f"Login failed: {resp.json()}")
