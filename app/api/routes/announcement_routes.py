@@ -9,8 +9,7 @@ from app.utils.helpers import log_audit_event
 from app.services.announcement_service import (
     save_attachment,
     sanitize_html,
-    get_announcements_paginated,
-    dispatch_announcement_emails
+    get_announcements_paginated
 )
 
 logger = logging.getLogger(__name__)
@@ -95,11 +94,6 @@ def create_announcement(current_user):
 
         # Audit Event Logging
         log_audit_event(current_user["user_id"], "announcement_create", f"Announcement '{sanitized_title}' (ID: {new_id}) created.")
-
-        # Asynchronous Email alerts if published immediately
-        if status == "published":
-            app = current_app._get_current_object()
-            dispatch_announcement_emails(app, sanitized_title, sanitized_description, new_id)
 
         return jsonify({
             "success": True,

@@ -2,7 +2,6 @@ import os
 import uuid
 import logging
 import re
-import threading
 from datetime import datetime
 from app.models.database import execute_query, execute_single
 from app.config import Config
@@ -173,50 +172,3 @@ def get_announcements_paginated(user_role: str, filters: dict, page: int = 1, li
         "limit": limit,
         "total_pages": total_pages
     }
-
-
-# ---------------------------------------------------------------------------
-# Asynchronous Background Email Dispatcher
-# ---------------------------------------------------------------------------
-
-def _bg_send_emails(app, title: str, description: str, announcement_id: int):
-    """Worker function to run in a background thread and send email alerts."""
-    with app.app_context():
-        try:
-            logger.info("BG thread started to fetch employee emails for announcements...")
-            
-            # Fetch all distinct employee emails
-            rows = execute_query("""
-                SELECT DISTINCT email 
-                FROM employee 
-                WHERE email IS NOT NULL AND email != ''
-            """)
-            
-            emails = [r["email"] for r in rows]
-            if not emails:
-                logger.info("No active employee email addresses found. Skipping email alerts.")
-                return
-
-            from app.utils.email_service import send_announcement_email
-            
-            logger.info(f"Dispatched background announcement email notification to {len(emails)} employees.")
-            
-            for email in emails:
-                try:
-                    send_announcement_email(email, title, description)
-                except Exception as ex:
-                    logger.error(f"Error sending announcement email to {email}: {ex}")
-
-        except Exception as e:
-            logger.error(f"Unhandled error in background email dispatch: {e}")
-
-
-def dispatch_announcement_emails(app, title: str, description: str, announcement_id: int):
-    """Spawns an asynchronous background thread to alert all employees."""
-    thread = threading.Thread(
-        target=_bg_send_emails,
-        args=(app, title, description, announcement_id),
-        daemon=True
-    )
-    thread.start()
-    logger.info("Asynchronous background email dispatch thread spawned successfully.")
