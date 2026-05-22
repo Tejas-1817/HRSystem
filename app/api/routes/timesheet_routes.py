@@ -96,111 +96,6 @@ def _get_day_max_hours(employee_name: str, date_str: str) -> float:
     return threshold
 
 
-def _get_hr_missing_timesheet_rows(week_start: date) -> list[dict]:
-    """Return all employee missing timesheet dates for the requested week."""
-    week_end = week_start + timedelta(days=6)
-
-    # All active employees only
-    employees = execute_query(
-        "SELECT employee_name FROM users WHERE role = 'employee' AND is_active = TRUE"
-    )
-    employee_names = [row["employee_name"] for row in employees]
-
-    if not employee_names:
-        return []
-
-    # Collect holidays for the week
-    holiday_rows = execute_query(
-        """
-            SELECT DATE(date) AS d
-            FROM holidays
-            WHERE date BETWEEN %s AND %s
-        """,
-        (week_start.isoformat(), week_end.isoformat())
-    )
-    holiday_dates = {row["d"].isoformat() if hasattr(row["d"], "isoformat") else str(row["d"]) for row in holiday_rows}
-
-    # Collect approved leave dates for employees in the week
-    leave_rows = execute_query(
-        """
-            SELECT employee_name, start_date, end_date
-            FROM leaves
-            WHERE status = 'approved'
-              AND start_date <= %s
-              AND end_date >= %s
-        """,
-        (week_end.isoformat(), week_start.isoformat())
-    )
-
-    leave_dates_by_employee: dict[str, set[str]] = {name: set() for name in employee_names}
-    for lv in leave_rows:
-        emp = lv["employee_name"]
-        if emp not in leave_dates_by_employee:
-            continue
-        sd = lv["start_date"] if isinstance(lv["start_date"], date) else date.fromisoformat(str(lv["start_date"]))
-        ed = lv["end_date"] if isinstance(lv["end_date"], date) else date.fromisoformat(str(lv["end_date"]))
-        cur = max(sd, week_start)
-        last = min(ed, week_end)
-        while cur <= last:
-            if cur.weekday() < 5:
-                leave_dates_by_employee[emp].add(cur.isoformat())
-            cur += timedelta(days=1)
-
-    # Collect days already submitted / pending / approved / rejected
-    submitted_rows = execute_query(
-        """
-            SELECT employee_name, DATE(start_date) AS d
-            FROM timesheets
-            WHERE status IN ('submitted', 'pending', 'approved', 'rejected')
-              AND start_date BETWEEN %s AND %s
-        """,
-        (week_start.isoformat(), week_end.isoformat())
-    )
-    submitted_dates_by_employee: dict[str, set[str]] = {name: set() for name in employee_names}
-    for row in submitted_rows:
-        emp = row["employee_name"]
-        if emp in submitted_dates_by_employee:
-            d = row["d"].isoformat() if hasattr(row["d"], "isoformat") else str(row["d"])
-            submitted_dates_by_employee[emp].add(d)
-
-    # Find latest project assignment for each employee, if any
-    assignment_rows = execute_query(
-        """
-            SELECT pa.employee_name, p.name AS project_name, pa.assigned_at
-            FROM project_assignments pa
-            LEFT JOIN projects p ON pa.project_id = p.id
-            WHERE pa.employee_name IN (%s)
-            ORDER BY pa.employee_name, pa.assigned_at DESC
-        """ % ", ".join(["%s"] * len(employee_names)),
-        tuple(employee_names)
-    )
-    project_by_employee: dict[str, str | None] = {name: None for name in employee_names}
-    for row in assignment_rows:
-        name = row["employee_name"]
-        if project_by_employee.get(name) is None:
-            project_by_employee[name] = row.get("project_name")
-
-    missing_rows = []
-    for emp in sorted(employee_names):
-        for offset in range(5):
-            current_date = week_start + timedelta(days=offset)
-            date_str = current_date.isoformat()
-            if date_str in holiday_dates:
-                continue
-            if date_str in leave_dates_by_employee.get(emp, set()):
-                continue
-            if date_str in submitted_dates_by_employee.get(emp, set()):
-                continue
-            missing_rows.append({
-                "employee_name": emp,
-                "missing_date": date_str,
-                "week_start": week_start.isoformat(),
-                "project_name": project_by_employee.get(emp),
-            })
-
-    return missing_rows
-
-
 # ---------------------------------------------------------------------------
 # GET /timesheets/ — list (manager/HR see all; employee sees own)
 # ---------------------------------------------------------------------------
@@ -209,29 +104,7 @@ def _get_hr_missing_timesheet_rows(week_start: date) -> list[dict]:
 @token_required
 def view_timesheets(current_user):
     try:
-        if current_user["role"] == "hr":
-            start_date_str = request.args.get("start_date")
-            if start_date_str:
-                try:
-                    week_start = date.fromisoformat(start_date_str)
-                except ValueError:
-                    return jsonify({"success": False, "error": "Invalid start_date format. Use YYYY-MM-DD"}), 400
-                if week_start.weekday() != 0:
-                    return jsonify({"success": False, "error": "start_date must be a Monday for HR missing timesheet view"}), 400
-            else:
-                today = date.today()
-                week_start = today - timedelta(days=today.weekday())
-
-            rows = _get_hr_missing_timesheet_rows(week_start)
-            return jsonify({
-                "success": True,
-                "missing_timesheets": rows,
-                "count": len(rows),
-                "week_start": week_start.isoformat(),
-                "week_end": (week_start + timedelta(days=6)).isoformat(),
-            }), 200
-
-        if current_user["role"] == "manager":
+        if current_user["role"] in ("manager", "hr"):
             rows = execute_query("""
                 SELECT t.*, p.project_id
                 FROM timesheets t
