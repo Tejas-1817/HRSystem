@@ -1,10 +1,141 @@
 import smtplib
 import logging
+import threading
+from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Internal: resolve an employee's registered email address
+# ---------------------------------------------------------------------------
+
+def _get_email_for_employee(employee_name: str) -> str | None:
+    """
+    Look up the login email (username) for an employee by their system name.
+    Returns None if the employee does not exist or has no account.
+    """
+    try:
+        from app.models.database import execute_single
+        row = execute_single(
+            "SELECT username FROM users WHERE employee_name = %s AND is_active = TRUE LIMIT 1",
+            (employee_name,)
+        )
+        return row["username"] if row else None
+    except Exception as exc:
+        logger.warning("Could not resolve email for employee '%s': %s", employee_name, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Internal: write delivery status to audit table (best-effort)
+# ---------------------------------------------------------------------------
+
+def _log_notification(
+    notification_type: str,
+    recipient_email: str,
+    recipient_name: str | None,
+    leave_id: int | None,
+    sent: bool,
+    error_message: str | None = None,
+) -> None:
+    """Insert one row into email_notification_logs. Swallows all exceptions."""
+    try:
+        from app.models.database import execute_query
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        execute_query(
+            """
+            INSERT INTO email_notification_logs
+              (notification_type, recipient_email, recipient_name,
+               leave_id, notification_sent, sent_at, error_message)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                notification_type,
+                recipient_email,
+                recipient_name,
+                leave_id,
+                sent,
+                now if sent else None,
+                error_message,
+            ),
+            commit=True,
+        )
+    except Exception as exc:
+        logger.error("Failed to write email_notification_logs: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Core: SMTP delivery (synchronous, called inside background thread)
+# ---------------------------------------------------------------------------
+
+def _smtp_send(to_email: str, subject: str, html_body: str, text_body: str) -> None:
+    """
+    Establish SMTP connection and send a multipart/alternative message.
+    Raises on any transport or authentication error (caller catches).
+    """
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = Config.MAIL_DEFAULT_SENDER
+    msg["To"]      = to_email
+
+    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html",  "utf-8"))
+
+    with smtplib.SMTP(Config.MAIL_SERVER, Config.MAIL_PORT, timeout=20) as server:
+        if Config.MAIL_USE_TLS:
+            server.starttls()
+        if Config.MAIL_USERNAME and Config.MAIL_PASSWORD:
+            server.login(Config.MAIL_USERNAME, Config.MAIL_PASSWORD)
+        server.sendmail(Config.MAIL_DEFAULT_SENDER, to_email, msg.as_string())
+
+
+# ---------------------------------------------------------------------------
+# Public API: async email send
+# ---------------------------------------------------------------------------
+
+def send_email_async(
+    to_email: str,
+    subject: str,
+    html_body: str,
+    text_body: str,
+    notification_type: str = "general",
+    recipient_name: str | None = None,
+    leave_id: int | None = None,
+) -> None:
+    """
+    Send an HTML email in a background daemon thread.
+
+    The calling request thread returns immediately — the email is delivered
+    asynchronously. Delivery status (success/failure) is written to the
+    `email_notification_logs` audit table.
+
+    Args:
+        to_email          : Recipient email address
+        subject           : Email subject line
+        html_body         : Full HTML email body
+        text_body         : Plain-text fallback body
+        notification_type : Audit label (e.g. 'leave_application')
+        recipient_name    : Human name for audit log
+        leave_id          : FK to leaves.id for traceability
+    """
+    def _worker():
+        try:
+            _smtp_send(to_email, subject, html_body, text_body)
+            logger.info("[email] ✓ Sent '%s' to %s", notification_type, to_email)
+            _log_notification(notification_type, to_email, recipient_name, leave_id, sent=True)
+        except Exception as exc:
+            logger.error("[email] ✗ Failed '%s' to %s: %s", notification_type, to_email, exc)
+            _log_notification(
+                notification_type, to_email, recipient_name, leave_id,
+                sent=False, error_message=str(exc)[:500]
+            )
+
+    thread = threading.Thread(target=_worker, daemon=True, name=f"email-{notification_type}")
+    thread.start()
 
 def send_reset_email(to_email, reset_link):
     """

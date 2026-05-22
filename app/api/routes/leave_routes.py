@@ -18,6 +18,11 @@ from app.services.leave_service import (
     get_employee_manager,
 )
 from app.utils.helpers import log_audit_event
+from app.services.leave_notification_service import (
+    notify_manager_leave_application,
+    notify_employee_leave_approved,
+    notify_employee_leave_rejected,
+)
 
 logger = logging.getLogger(__name__)
 leave_bp = Blueprint('leaves', __name__)
@@ -894,6 +899,23 @@ def apply_leave(current_user):
                 "leave_pending",
             )
 
+            # ── Email: notify manager async (never blocks response) ──────
+            if manager_name:
+                _email_leave_data = {
+                    "id":                 new_leave_id,
+                    "employee_name":      employee_name,
+                    "employee_id":        None,
+                    "leave_type":         leave_type,
+                    "leave_type_category": leave_type_category,
+                    "half_day_period":    half_day_period,
+                    "start_date":         start_date,
+                    "end_date":           end_date,
+                    "leave_duration":     str(duration),
+                    "reason":             data.get("reason", ""),
+                    "applied_at":         None,
+                }
+                notify_manager_leave_application(_email_leave_data, manager_name)
+
         period_label = ""
         if leave_type_category == "half_day":
             period_label = " (First Half)" if half_day_period == "first_half" else " (Second Half)"
@@ -961,6 +983,11 @@ def approve_leave(current_user, leave_id):
             "leave_approved"
         )
         log_audit_event(current_user["user_id"], "leave_approval", f"Approved leave ID {leave_id} for {leave['employee_name']}")
+
+        # ── Email: notify employee of approval async ───────────────────
+        _approve_leave_data = dict(leave)
+        _approve_leave_data["approved_at"] = None  # just happened — use current time
+        notify_employee_leave_approved(_approve_leave_data, current_user["employee_name"])
 
         cat = leave.get("leave_type_category", "full_day") or "full_day"
         period_str = ""
@@ -1030,6 +1057,13 @@ def reject_leave(current_user, leave_id):
             "leave_rejected"
         )
         log_audit_event(current_user["user_id"], "leave_rejection", f"Rejected leave ID {leave_id} for {leave['employee_name']}")
+
+        # ── Email: notify employee of rejection async ──────────────────
+        notify_employee_leave_rejected(
+            leave_data=dict(leave),
+            rejector_name=current_user["employee_name"],
+            rejection_reason=reason,
+        )
 
         return jsonify({
             "success": True,

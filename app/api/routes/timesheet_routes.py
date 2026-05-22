@@ -998,6 +998,13 @@ def export_timesheets(current_user):
         """
         params = [emp_name]
 
+        # RBAC: Managers querying other team member's data can only see timesheet rows for projects they manage
+        if current_user["role"] == "manager" and emp_name != current_user["employee_name"]:
+            query += """ AND t.project IN (
+                SELECT name FROM projects WHERE manager_name = %s
+            ) """
+            params.append(current_user["employee_name"])
+
         # Apply dynamic filters
         if start_date_str:
             query += " AND t.start_date >= %s"
@@ -1028,9 +1035,18 @@ def export_timesheets(current_user):
             if not r.get("manager_name"):
                 r["manager_name"] = r.get("proj_manager_name") or "N/A"
 
-        # Generate Excel using utility
+        # Generate Excel using utility with date range parameters for metadata
         from app.utils.excel_utils import generate_timesheet_excel
-        excel_file = generate_timesheet_excel(emp_name, rows)
+        excel_file = generate_timesheet_excel(emp_name, rows, start_date_str, end_date_str)
+        
+        # Compliance & Security Audit Logging
+        execute_query("""
+            INSERT INTO audit_logs (user_id, event_type, description)
+            VALUES (%s, 'timesheet_export', %s)
+        """, (
+            current_user["user_id"], 
+            f"User {current_user['employee_name']} ({current_user['role']}) exported timesheet Excel report for {emp_name}."
+        ), commit=True)
         
         # Professional filename convention: Timesheet_EmployeeName_YYYYMMDD.xlsx
         timestamp = datetime.now().strftime("%Y%m%d")
@@ -1046,3 +1062,4 @@ def export_timesheets(current_user):
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
