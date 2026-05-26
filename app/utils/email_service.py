@@ -179,7 +179,7 @@ def send_reset_email(to_email, reset_link):
             <td style="background-color:#1F4E78;padding:28px 32px;">
               <p style="margin:0;font-size:13px;font-weight:600;
                          color:rgba(255,255,255,0.75);letter-spacing:1.5px;
-                         text-transform:uppercase;">Altzor HRMS</p>
+                         text-transform:uppercase;">RISE</p>
               <h1 style="margin:6px 0 0;font-size:22px;font-weight:700;
                           color:#FFFFFF;line-height:1.3;">Password Reset Request</h1>
               <p style="margin:6px 0 0;font-size:14px;color:rgba(255,255,255,0.85);">
