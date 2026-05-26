@@ -29,7 +29,7 @@ _COLOR_TEXT_BODY       = "#333333"   # Main body text
 _COLOR_TEXT_MUTED      = "#777777"   # Footer / secondary
 _COLOR_BORDER          = "#E0E0E0"   # Divider lines
 _FONT_FAMILY           = "Segoe UI, Helvetica Neue, Arial, sans-serif"
-_HRMS_NAME             = "Altzor HRMS"
+_HRMS_NAME             = "RISE"
 
 
 def _get_hrms_url() -> str:
