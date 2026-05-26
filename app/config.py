@@ -24,6 +24,10 @@ class Config:
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "your-app-password")
     MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", "HRMS Support <your-email@gmail.com>")
 
+    # Frontend URL (used in password reset emails, leave notifications, etc.)
+    # MUST be set to the public/production URL in .env on deployed environments.
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5002")
+
     @staticmethod
     def get_db_config():
         return {

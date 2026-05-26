@@ -326,9 +326,8 @@ def forgot_password():
                 commit=True
             )
             
-            # Construct reset link
-            # In production, use the actual frontend URL from config
-            reset_link = f"http://192.168.1.151:5002/reset-password?token={token}"
+            # Construct reset link using centralized frontend URL config
+            reset_link = f"{Config.FRONTEND_URL}/reset-password?token={token}"
             
             # Send email
             send_reset_email(email, reset_link)

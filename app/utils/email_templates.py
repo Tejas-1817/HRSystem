@@ -30,7 +30,20 @@ _COLOR_TEXT_MUTED      = "#777777"   # Footer / secondary
 _COLOR_BORDER          = "#E0E0E0"   # Divider lines
 _FONT_FAMILY           = "Segoe UI, Helvetica Neue, Arial, sans-serif"
 _HRMS_NAME             = "Altzor HRMS"
-_HRMS_URL              = "http://localhost:5002"
+
+
+def _get_hrms_url() -> str:
+    """Resolve the HRMS frontend URL from Config at call time (not import time)."""
+    try:
+        from app.config import Config
+        return Config.FRONTEND_URL
+    except Exception:
+        return "http://localhost:5002"
+
+
+# Module-level alias — used as f-string variable in templates.
+# Each template function should call _get_hrms_url() to get the current value.
+_HRMS_URL              = None  # Sentinel; see _get_hrms_url()
 
 
 # ─── Internal Helpers ─────────────────────────────────────────────────────────
@@ -97,7 +110,7 @@ def _base_layout(header_title: str, header_subtitle: str, header_color: str, bod
               <p style="margin:0;font-size:12px;color:{_COLOR_TEXT_MUTED};line-height:1.6;">
                 This is an automated notification from <strong>{_HRMS_NAME}</strong>.
                 Please do not reply directly to this email.<br>
-                <a href="{_HRMS_URL}" style="color:{_COLOR_BRAND_PRIMARY};text-decoration:none;">
+                <a href="{_get_hrms_url()}" style="color:{_COLOR_BRAND_PRIMARY};text-decoration:none;">
                   Open HRMS Dashboard
                 </a>
                 &nbsp;|&nbsp;
@@ -205,7 +218,7 @@ def leave_application_to_manager(
     subject = f"New Leave Request Submitted – {employee_name}"
     leave_type_label = _leave_type_label(leave_type)
     period_str = _period_label(leave_type_category, half_day_period)
-    review_url = f"{_HRMS_URL}/leaves" + (f"/{leave_id}" if leave_id else "")
+    review_url = f"{_get_hrms_url()}/leaves" + (f"/{leave_id}" if leave_id else "")
     emp_id_display = str(employee_id) if employee_id else "N/A"
     duration_display = f"{total_days:.1f} day(s) ({period_str})"
 
@@ -324,7 +337,7 @@ def leave_approved_to_employee(
         balance in the HRMS portal.
       </p>
 
-      {_cta_button("View My Leave Balance →", f"{_HRMS_URL}/leaves/balance")}
+      {_cta_button("View My Leave Balance →", f"{_get_hrms_url()}/leaves/balance")}
 
       <p style="margin:20px 0 0;font-size:13px;color:{_COLOR_TEXT_MUTED};
                 border-top:1px solid {_COLOR_BORDER};padding-top:16px;">
@@ -354,7 +367,7 @@ Approved By : {approved_by}
 Approved At : {approved_at}
 
 Your leave balance has been updated. Log in to view it:
-{_HRMS_URL}/leaves/balance
+{_get_hrms_url()}/leaves/balance
 
 ---
 This is an automated message from {_HRMS_NAME}.
@@ -416,7 +429,7 @@ def leave_rejected_to_employee(
         or raise a query through the HRMS helpdesk.
       </p>
 
-      {_cta_button("Apply for New Leave →", f"{_HRMS_URL}/leaves/apply")}
+      {_cta_button("Apply for New Leave →", f"{_get_hrms_url()}/leaves/apply")}
 
       <p style="margin:20px 0 0;font-size:13px;color:{_COLOR_TEXT_MUTED};
                 border-top:1px solid {_COLOR_BORDER};padding-top:16px;">
@@ -449,7 +462,7 @@ Rejection Reason : {rejection_reason or 'No reason provided'}
 Your leave balance has NOT been deducted for this request.
 
 If you have concerns, please contact your manager or HR.
-Log in to the HRMS: {_HRMS_URL}
+Log in to the HRMS: {_get_hrms_url()}
 
 ---
 This is an automated message from {_HRMS_NAME}.

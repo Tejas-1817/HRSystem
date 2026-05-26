@@ -139,52 +139,121 @@ def send_email_async(
 
 def send_reset_email(to_email, reset_link):
     """
-    Sends a password reset email using SMTP.
-    In production, this should use a background task (like Celery)
-    to avoid blocking the request.
+    Sends a branded password reset email asynchronously.
+    Uses the same professional Altzor HRMS template as leave notifications.
+    Delivery status is logged to the email_notification_logs audit table.
     """
-    try:
-        # Create message
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = "Password Reset Request - HRMS"
-        msg["From"] = Config.MAIL_DEFAULT_SENDER
-        msg["To"] = to_email
+    from datetime import datetime as _dt
 
-        # Create text/html body
-        text = f"Hello,\n\nYou requested a password reset. Please click the link below to reset your password:\n{reset_link}\n\nThis link will expire in 30 minutes.\n\nIf you didn't request this, please ignore this email."
-        html = f"""
-        <html>
-        <body>
-            <p>Hello,</p>
-            <p>You requested a password reset. Please click the button below to reset your password:</p>
-            <a href="{reset_link}" style="background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Reset Password</a>
-            <p>This link will expire in 30 minutes.</p>
-            <p>If you didn't request this, please ignore this email.</p>
-        </body>
-        </html>
-        """
+    year = _dt.now().year
 
-        msg.attach(MIMEText(text, "plain"))
-        msg.attach(MIMEText(html, "html"))
+    subject = "Password Reset Request – Altzor HRMS"
 
-        # Connect and send
-        with smtplib.SMTP(Config.MAIL_SERVER, Config.MAIL_PORT) as server:
-            if Config.MAIL_USE_TLS:
-                server.starttls()
-            
-            # Note: MAIL_PASSWORD should be an App Password if using Gmail
-            if Config.MAIL_USERNAME and Config.MAIL_PASSWORD:
-                server.login(Config.MAIL_USERNAME, Config.MAIL_PASSWORD)
-            
-            server.sendmail(Config.MAIL_DEFAULT_SENDER, to_email, msg.as_string())
-        
-        logger.info(f"Password reset email sent to {to_email}")
-        return True
+    text = (
+        f"Hello,\n\n"
+        f"You requested a password reset. Please click the link below to reset your password:\n\n"
+        f"{reset_link}\n\n"
+        f"This link will expire in 30 minutes.\n\n"
+        f"If you didn't request this, please ignore this email.\n\n"
+        f"---\nThis is an automated message from Altzor HRMS."
+    )
 
-    except Exception as e:
-        logger.error(f"Failed to send email to {to_email}: {str(e)}")
-        # In production, you might want to re-raise or handle this specifically
-        return False
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Password Reset</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4F6F9;font-family:Segoe UI,Helvetica Neue,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0"
+         style="background-color:#F4F6F9;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" border="0"
+               style="max-width:600px;width:100%;border-radius:8px;
+                      overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.10);">
+
+          <!-- Brand Header -->
+          <tr>
+            <td style="background-color:#1F4E78;padding:28px 32px;">
+              <p style="margin:0;font-size:13px;font-weight:600;
+                         color:rgba(255,255,255,0.75);letter-spacing:1.5px;
+                         text-transform:uppercase;">Altzor HRMS</p>
+              <h1 style="margin:6px 0 0;font-size:22px;font-weight:700;
+                          color:#FFFFFF;line-height:1.3;">Password Reset Request</h1>
+              <p style="margin:6px 0 0;font-size:14px;color:rgba(255,255,255,0.85);">
+                A password reset was requested for your account
+              </p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="background-color:#FFFFFF;padding:32px;">
+              <p style="margin:0 0 16px;font-size:15px;color:#333;line-height:1.6;">
+                Hello,
+              </p>
+              <p style="margin:0 0 24px;font-size:15px;color:#333;line-height:1.6;">
+                We received a request to reset your password. Click the button below
+                to create a new password. This link will expire in
+                <strong>30 minutes</strong>.
+              </p>
+
+              <table cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+                <tr>
+                  <td style="border-radius:6px;background-color:#1F4E78;">
+                    <a href="{reset_link}" target="_blank"
+                       style="display:inline-block;padding:12px 28px;font-size:14px;
+                              font-weight:600;color:#FFFFFF;text-decoration:none;
+                              border-radius:6px;letter-spacing:0.3px;">Reset My Password &rarr;</a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:16px 0 8px;font-size:13px;color:#777;line-height:1.6;">
+                If the button doesn't work, copy and paste this URL into your browser:
+              </p>
+              <p style="margin:0 0 24px;font-size:12px;color:#1F4E78;word-break:break-all;">
+                {reset_link}
+              </p>
+
+              <p style="margin:20px 0 0;font-size:13px;color:#777;
+                        border-top:1px solid #E0E0E0;padding-top:16px;">
+                If you didn't request a password reset, you can safely ignore this email.
+                Your password will remain unchanged.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#F8F9FB;padding:20px 32px;
+                        border-top:1px solid #E0E0E0;">
+              <p style="margin:0;font-size:12px;color:#777;line-height:1.6;">
+                This is an automated notification from <strong>Altzor HRMS</strong>.
+                Please do not reply directly to this email.<br>
+                &copy; {year} Altzor Technologies. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+    send_email_async(
+        to_email=to_email,
+        subject=subject,
+        html_body=html,
+        text_body=text,
+        notification_type="password_reset",
+        recipient_name=to_email,
+    )
+    logger.info(f"Password reset email queued for {to_email}")
 
 
 def send_announcement_email(to_email, title, description):
@@ -214,7 +283,7 @@ def send_announcement_email(to_email, title, description):
                 <div style="background-color: #fff; border-left: 4px solid #007bff; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
                     {description}
                 </div>
-                <p>Please log into your <a href="http://192.168.1.151:5002" style="color: #007bff; text-decoration: none; font-weight: bold;">HRMS Dashboard</a> to view full details and check any attachments.</p>
+                <p>Please log into your <a href="{Config.FRONTEND_URL}" style="color: #007bff; text-decoration: none; font-weight: bold;">HRMS Dashboard</a> to view full details and check any attachments.</p>
                 <div style="font-size: 12px; color: #777; border-top: 1px solid #eee; padding-top: 10px; text-align: center; margin-top: 20px;">
                     This is an automated notification from Altzor HRMS. Please do not reply directly to this email.
                 </div>
