@@ -9,6 +9,7 @@ from app.services.timesheet_service import (
     get_pending_approvals,
     notify_submission,
     log_submission_event,
+    log_edit_history,
 )
 import calendar
 
@@ -472,6 +473,32 @@ def add_timesheet(current_user):
 
 
 # ---------------------------------------------------------------------------
+# GET /timesheets/<id> — get a single entry (used for edit form)
+# ---------------------------------------------------------------------------
+
+@timesheet_bp.route("/<int:entry_id>", methods=["GET"])
+@token_required
+def get_timesheet(current_user, entry_id):
+    try:
+        row = execute_single("SELECT * FROM timesheets WHERE id = %s", (entry_id,))
+        if not row:
+            return jsonify({"success": False, "error": "Entry not found"}), 404
+
+        # RBAC: Employees can only view their own pending/submitted timesheets
+        if current_user["role"] == "employee" and row["employee_name"] != current_user["employee_name"]:
+            return jsonify({"success": False, "error": "Access denied"}), 403
+
+        # Serialize date/datetime objects
+        for k, v in row.items():
+            if hasattr(v, "isoformat"):
+                row[k] = v.isoformat()
+
+        return jsonify({"success": True, "timesheet": row}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
 # PUT /timesheets/<id> — update an existing entry (employee: own pending only)
 # ---------------------------------------------------------------------------
 
@@ -544,15 +571,37 @@ def update_timesheet(current_user, entry_id):
         # Detect re-submission after rejection
         was_rejected = row["status"] == "rejected"
 
+        # Extract values for logging
+        new_project = data.get("project", row["project"])
+        new_task = data.get("task", row["task"])
+        new_description = data.get("description", row["description"])
+        
+        # Log to edit history before updating
+        try:
+            # Only log if there are actual changes
+            if (row["project"] != new_project or 
+                row["task"] != new_task or 
+                float(row["hours"]) != float(hours_to_use) or 
+                row["description"] != new_description):
+                log_edit_history(
+                    entry_id, 
+                    current_user["employee_name"], 
+                    row, 
+                    {"project": new_project, "task": new_task, "hours": hours_to_use, "description": new_description}
+                )
+        except Exception as log_e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to log edit history for timesheet {entry_id}: {log_e}")
+
         execute_query("""
             UPDATE timesheets
             SET project = %s, task = %s, description = %s, hours = %s,
                 start_date = %s, status = 'submitted', manager_comments = NULL,
                 rejection_reason = NULL, approved_by = NULL, approver_role = NULL, approved_at = NULL
             WHERE id = %s
-        """, (data.get("project", row["project"]),
-              data.get("task", row["task"]),
-              data.get("description", row["description"]),
+        """, (new_project,
+              new_task,
+              new_description,
               hours_to_use,
               target_date,
               entry_id), commit=True)
@@ -560,10 +609,40 @@ def update_timesheet(current_user, entry_id):
         # Log resubmission event and notify approver
         if was_rejected:
             log_submission_event(entry_id, emp_name, current_user["role"], is_resubmit=True)
-            updated_project = data.get("project", row["project"])
-            notify_submission(emp_name, current_user["role"], entry_id, updated_project, target_date)
+            notify_submission(emp_name, current_user["role"], entry_id, new_project, target_date)
 
         return jsonify({"success": True, "message": "Timesheet entry updated"}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# GET /timesheets/<id>/edit-history — fetch version history of edits
+# ---------------------------------------------------------------------------
+
+@timesheet_bp.route("/<int:entry_id>/edit-history", methods=["GET"])
+@token_required
+def get_edit_history(current_user, entry_id):
+    try:
+        ts = execute_single("SELECT id, employee_name FROM timesheets WHERE id = %s", (entry_id,))
+        if not ts:
+            return jsonify({"success": False, "error": "Timesheet entry not found"}), 404
+
+        if current_user["role"] == "employee" and ts["employee_name"] != current_user["employee_name"]:
+            return jsonify({"success": False, "error": "Access denied"}), 403
+
+        rows = execute_query("""
+            SELECT * FROM timesheet_edit_history
+            WHERE timesheet_id = %s
+            ORDER BY changed_at DESC
+        """, (entry_id,))
+
+        for row in rows:
+            for k, v in row.items():
+                if hasattr(v, "isoformat"):
+                    row[k] = v.isoformat()
+
+        return jsonify({"success": True, "history": rows}), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

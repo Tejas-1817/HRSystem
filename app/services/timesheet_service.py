@@ -392,6 +392,30 @@ def log_submission_event(timesheet_id: int, employee_name: str, employee_role: s
         logger.warning(f"Failed to log submission event for timesheet {timesheet_id}: {e}")
 
 
+def log_edit_history(timesheet_id: int, changed_by: str, old_data: dict, new_data: dict):
+    """Record changes made to a timesheet entry."""
+    try:
+        execute_query("""
+            INSERT INTO timesheet_edit_history (
+                timesheet_id, changed_by, 
+                old_project, new_project,
+                old_task, new_task,
+                old_hours, new_hours,
+                old_description, new_description
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            timesheet_id, 
+            changed_by,
+            old_data.get("project"), new_data.get("project"),
+            old_data.get("task"), new_data.get("task"),
+            old_data.get("hours"), new_data.get("hours"),
+            old_data.get("description"), new_data.get("description")
+        ), commit=True)
+    except Exception as e:
+        logger.warning(f"Failed to log edit history for timesheet {timesheet_id}: {e}")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal Helpers
 # ─────────────────────────────────────────────────────────────────────────────
