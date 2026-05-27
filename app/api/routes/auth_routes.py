@@ -14,6 +14,7 @@ from app.services.employee_service import create_employee_record, update_employe
 import mysql.connector
 import uuid
 from app.utils.email_service import send_reset_email
+from app.utils.display_name_service import get_display_name, get_clean_name, enrich_record_with_display_name
 
 logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__)
@@ -102,6 +103,12 @@ def login():
 
         if isinstance(token, bytes): token = token.decode("utf-8")
 
+        # Resolve clean display names for the response
+        original_name_row = execute_single(
+            "SELECT original_name FROM users WHERE id = %s", (user["id"],)
+        )
+        clean_name = (original_name_row or {}).get("original_name") or get_clean_name(user["employee_name"])
+
         return jsonify({
             "success": True,
             "message": "Login successful",
@@ -111,6 +118,8 @@ def login():
                 "username": user["username"],
                 "role": user["role"],
                 "employee_name": user["employee_name"],
+                "full_name": clean_name,
+                "display_name": get_display_name(clean_name, user["role"]),
                 "password_change_required": user["password_change_required"]
             }
         }), 200
@@ -229,6 +238,9 @@ def get_profile(current_user):
 @role_required(["hr"])
 def get_all_users(current_user):
     users = execute_query("SELECT id, username, original_name, role, employee_name, is_active, created_at FROM users ORDER BY role, username")
+    # Enrich each user with full_name and display_name
+    for u in users:
+        enrich_record_with_display_name(u, name_field="employee_name", role_field="role")
     return jsonify({"success": True, "users": users}), 200
 
 @auth_bp.route("/users/<int:user_id>/role", methods=["PATCH"])

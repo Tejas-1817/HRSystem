@@ -34,6 +34,7 @@ from app.services.team_member_service import (
     delete_team_member
 )
 from app.config.terminology import get_message, get_label, get_audit_event
+from app.utils.display_name_service import enrich_record_with_display_name
 import mysql.connector
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,11 @@ def serialize_team_member(rows):
         # ─────────────────────────────────────────────────────────────────
         photo = item.get("photo")
         item["photo_url"] = photo if photo else None
+
+        # ─────────────────────────────────────────────────────────────────
+        # Display Name Enrichment (full_name + display_name)
+        # ─────────────────────────────────────────────────────────────────
+        enrich_record_with_display_name(item, name_field="name", role_field="role")
     
     return items if is_list else items[0]
 

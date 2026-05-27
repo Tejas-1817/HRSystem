@@ -1,11 +1,11 @@
 USE hrms;
 
-INSERT IGNORE INTO employee (name, email, phone, id, salary, date_of_birth, date_of_joining) VALUES
-('M_Tejas', 'tejas@gmail.com', 8362954547, '19950514', 65000.00, '1995-05-14', '2020-06-01'),
+INSERT IGNORE INTO employee (name, original_name, email, phone, id, salary, date_of_birth, date_of_joining) VALUES
+('M_Tejas', 'Tejas', 'tejas@gmail.com', 8362954547, '19950514', 65000.00, '1995-05-14', '2020-06-01'),
 
-('T_Raj', 'raj@gmail.com', 7385694562, '19880217', 58000.00, '1988-02-17', '2019-01-10'),
+('T_Raj', 'Raj', 'raj@gmail.com', 7385694562, '19880217', 58000.00, '1988-02-17', '2019-01-10'),
 
-('H_Saurabh', 'saurabh@gmail.com', 8885695257, '19931230', 61000.00, '1993-12-30', '2021-09-20');
+('H_Saurabh', 'Saurabh', 'saurabh@gmail.com', 8885695257, '19931230', 61000.00, '1993-12-30', '2021-09-20');
 
 INSERT IGNORE INTO projects (id, project_id, name, status, manager_name, customer_name, contact_person, phone, email, start_date, end_date) VALUES
 (1, 'PROJ-2026-001', 'Employee Records', 'ongoing', 'M_Tejas', 'Acme Corp', 'John Doe', '1234567890', 'john@acme.com', '2026-01-01', '2026-12-31'),

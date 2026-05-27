@@ -13,6 +13,7 @@ import re
 from app.models.database import execute_query, execute_single, Transaction
 from app.services.leave_service import allocate_default_leaves
 from app.utils.helpers import generate_unique_username, cascade_rename_employee, log_audit_event
+from app.utils.display_name_service import strip_all_prefixes
 from app.config.terminology import get_message
 import logging
 
@@ -30,8 +31,8 @@ def create_employee_record(data, role, cursor, with_user=True):
     
     This function maintains backward compatibility by delegating to team_member_service.
     """
-    # Strip any prefix the frontend may have added
-    original_name = re.sub(r'^[HMT]_', '', data.get("name", "") or data.get("employee_name", ""))
+    # Strip ALL known role prefixes (including A_, HR_, duplicates like A_A_)
+    original_name = strip_all_prefixes(data.get("name", "") or data.get("employee_name", ""))
     
     if not original_name:
         raise ValueError(get_message("required_field", field="Name"))

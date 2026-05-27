@@ -20,6 +20,7 @@ from app.models.database import execute_query, execute_single, Transaction
 from app.api.middleware.auth import token_required, role_required
 from app.services.employee_service import create_employee_record, update_employee_role
 from app.config.terminology import get_message
+from app.utils.display_name_service import enrich_record_with_display_name, get_clean_name
 import mysql.connector
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,11 @@ def serialize_employee(rows):
         # ─────────────────────────────────────────────────────────────────
         photo = item.get("photo")
         item["photo_url"] = photo if photo else None
+
+        # ─────────────────────────────────────────────────────────────────
+        # Display Name Enrichment (full_name + display_name)
+        # ─────────────────────────────────────────────────────────────────
+        enrich_record_with_display_name(item, name_field="name", role_field="role")
             
     return items if is_list else items[0]
 

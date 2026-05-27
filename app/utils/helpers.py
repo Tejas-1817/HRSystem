@@ -1,43 +1,37 @@
 import re
 from datetime import datetime
+from app.utils.display_name_service import strip_all_prefixes, ROLE_PREFIX_MAP
 
 def format_role_name(name, role):
     """
-    Cleans any existing role prefix and applies the correct one:
-    HR -> H_, Manager -> M_, Employee -> T_
+    Cleans any existing role prefix and applies the correct one.
+    Uses centralized display_name_service for prefix stripping.
+    
+    Prefix standards:
+        Admin -> A_, HR -> HR_, Manager -> M_, Employee/Team Member -> TM_
+    
     Note: For production, use generate_unique_username which checks DB.
     """
     if not name:
         return name
     
-    # Remove existing role prefixes if present (handle H_, M_, T_)
-    name = re.sub(r'^[HMT]_', '', name)
+    # Remove ALL known role prefixes (including stacked duplicates)
+    name = strip_all_prefixes(name)
     
-    prefix_map = {
-        'admin': 'A_',
-        'hr': 'H_',
-        'manager': 'M_',
-        'employee': 'T_'
-    }
-    
-    prefix = prefix_map.get(role.lower(), 'T_')
+    prefix = ROLE_PREFIX_MAP.get(role.lower(), 'TM') + '_'
     return f"{prefix}{name}"
 
 
 def generate_unique_username(name, role, cursor):
     """
-    Generates a unique prefixed username.
-    Example: T_Omkar, T_Omkar_1, etc.
-    """
-    clean_name = re.sub(r'^[HMT]_', '', name)
+    Generates a unique prefixed system identity.
+    Uses centralized display_name_service for prefix handling.
     
-    prefix_map = {
-        'admin': 'A_',
-        'hr': 'H_',
-        'manager': 'M_',
-        'employee': 'T_'
-    }
-    prefix = prefix_map.get(role.lower(), 'T_')
+    Example: TM_Omkar, TM_Omkar_1, etc.
+    """
+    clean_name = strip_all_prefixes(name)
+    
+    prefix = ROLE_PREFIX_MAP.get(role.lower(), 'TM') + '_'
     base_username = f"{prefix}{clean_name}"
     
     # Check uniqueness in users table

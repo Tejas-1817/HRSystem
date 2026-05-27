@@ -15,6 +15,7 @@ import re
 from app.models.database import execute_query, execute_single, Transaction
 from app.services.leave_service import allocate_default_leaves
 from app.utils.helpers import generate_unique_username, cascade_rename_employee, log_audit_event
+from app.utils.display_name_service import strip_all_prefixes
 from app.config.terminology import get_message, get_label, get_audit_event
 import logging
 
@@ -48,8 +49,8 @@ def create_team_member_record(data, role, cursor, with_user=True):
     Raises:
         ValueError: If required fields are missing or invalid
     """
-    # Strip any prefix the frontend may have added
-    original_name = re.sub(r'^[HMT]_', '', data.get("name", "") or data.get("team_member_name", "") or data.get("employee_name", ""))
+    # Strip ALL known role prefixes (including A_, HR_, duplicates like A_A_)
+    original_name = strip_all_prefixes(data.get("name", "") or data.get("team_member_name", "") or data.get("employee_name", ""))
     
     if not original_name:
         raise ValueError(get_message("required_field", field="Team Member name"))

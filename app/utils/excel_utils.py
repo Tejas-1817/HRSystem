@@ -3,6 +3,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime
+from app.utils.display_name_service import get_clean_name
 
 def generate_timesheet_excel(employee_name, timesheets, start_date_str=None, end_date_str=None):
     """
@@ -57,7 +58,7 @@ def generate_timesheet_excel(employee_name, timesheets, start_date_str=None, end
     
     # Metadata Fields
     metadata = [
-        ("Team Member:", employee_name),
+        ("Team Member:", get_clean_name(employee_name)),
         ("Report Period:", f"{start_date_str} to {end_date_str}" if (start_date_str or end_date_str) else "All Records"),
         ("Export Date:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     ]
@@ -94,7 +95,7 @@ def generate_timesheet_excel(employee_name, timesheets, start_date_str=None, end
     data_start_row = 8
     for idx, ts in enumerate(timesheets):
         row_num = data_start_row + idx
-        curr_member = ts.get("employee_name", employee_name)
+        curr_member = get_clean_name(ts.get("employee_name", employee_name))
         project = ts.get("project", "N/A")
         hours = float(ts.get("hours", 0))
         is_billable = "Billable" if ts.get("is_billable") or ts.get("billable") else "Non-Billable"
