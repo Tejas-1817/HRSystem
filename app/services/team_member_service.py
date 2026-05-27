@@ -50,15 +50,16 @@ def create_team_member_record(data, role, cursor, with_user=True):
         ValueError: If required fields are missing or invalid
     """
     # Strip ALL known role prefixes (including A_, HR_, duplicates like A_A_)
-    original_name = strip_all_prefixes(data.get("name", "") or data.get("team_member_name", "") or data.get("employee_name", ""))
+    raw_name = data.get("name", "") or data.get("team_member_name", "") or data.get("employee_name", "")
+    clean_name = strip_all_prefixes(raw_name)
     
-    if not original_name:
+    if not clean_name:
         raise ValueError(get_message("required_field", field="Team Member name"))
     
-    # Generate unique system name (e.g., T_Kartik)
-    team_member_id = generate_unique_username(original_name, role, cursor)
+    # Generate unique system name (e.g., Kartik or Kartik_1)
+    team_member_id = generate_unique_username(clean_name, role, cursor)
     
-    logger.info(f"Creating team member record for {original_name} as {team_member_id} (Role: {role})")
+    logger.info(f"Creating team member record for {clean_name} as {team_member_id} (Role: {role})")
     
     # Extract dates/fields (support multiple naming conventions for compatibility)
     dob = data.get("date_of_birth") or data.get("dob") or data.get("birthDate")
@@ -69,13 +70,12 @@ def create_team_member_record(data, role, cursor, with_user=True):
         raise ValueError(get_message("required_field", field="Email") + " (required for team member creation and login setup)")
     
     # 1. Insert team member record (uses "employee" table for production stability)
-    # Note: Database table names remain unchanged to avoid migration burden
     cursor.execute("""
         INSERT INTO employee 
-        (name, original_name, email, phone, salary, date_of_birth, date_of_joining, photo, pdf_file, docx_file)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (name, email, phone, salary, date_of_birth, date_of_joining, photo, pdf_file, docx_file)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
-        team_member_id, original_name, email, data.get("phone"),
+        team_member_id, email, data.get("phone"),
         data.get("salary"), dob, doj, data.get("photo_path"), 
         data.get("pdf_path"), data.get("docx_path")
     ))
@@ -89,17 +89,17 @@ def create_team_member_record(data, role, cursor, with_user=True):
         logger.info(f"Generating login account for {sanitized_username}")
         hashed_password = generate_password_hash(DEFAULT_TEMP_PASSWORD)
         cursor.execute("""
-            INSERT INTO users (username, original_name, password, role, employee_name, password_change_required, is_active)
-            VALUES (%s, %s, %s, %s, %s, TRUE, TRUE)
-        """, (sanitized_username, original_name, hashed_password, role, team_member_id))
+            INSERT INTO users (username, password, role, employee_name, password_change_required, is_active)
+            VALUES (%s, %s, %s, %s, TRUE, TRUE)
+        """, (sanitized_username, hashed_password, role, team_member_id))
     
     # 4. Log audit event with modern terminology
     log_audit_event(
         event_type="team_member_created",
-        description=get_audit_event("entity_created", name=original_name)
+        description=get_audit_event("entity_created", name=clean_name)
     )
     
-    return team_member_id, original_name
+    return team_member_id, clean_name
 
 
 def update_team_member_role(admin_id, team_member_id, new_role):
@@ -126,15 +126,14 @@ def update_team_member_role(admin_id, team_member_id, new_role):
 
     with Transaction() as cursor:
         # 1. Fetch current state
-        cursor.execute("SELECT id, role, employee_name, original_name FROM users WHERE id=%s", (team_member_id,))
+        cursor.execute("SELECT id, role, employee_name FROM users WHERE id=%s", (team_member_id,))
         user = cursor.fetchone()
         
         if not user:
             raise ValueError(get_message("not_found"))
         
         old_role = user['role']
-        old_team_member_id = user['employee_name']
-        original_name = user['original_name']
+        system_id = user['employee_name']
 
         # 2. Early exit if no change needed
         if old_role == new_role:
@@ -145,33 +144,27 @@ def update_team_member_role(admin_id, team_member_id, new_role):
                 "reauth_required": False
             }
 
-        # 3. Generate new prefixed system identity
-        new_team_member_id = generate_unique_username(original_name, new_role, cursor)
-        
-        logger.info(f"Updating team member role: {old_team_member_id} ({old_role}) -> {new_team_member_id} ({new_role})")
+        logger.info(f"Updating team member role: {system_id} ({old_role}) -> ({new_role})")
 
-        # 4. Atomic Updates: Authentication & Profile
-        cursor.execute("UPDATE users SET role=%s, employee_name=%s WHERE id=%s", 
-                      (new_role, new_team_member_id, team_member_id))
-        cursor.execute("UPDATE employee SET role=%s, name=%s WHERE name=%s", 
-                      (new_role, new_team_member_id, old_team_member_id))
+        # 3. Atomic Updates: Authentication & Profile
+        # Because we no longer use prefixed names, the system_id remains exactly the same!
+        # There is NO NEED to cascade rename across 15+ tables.
+        cursor.execute("UPDATE users SET role=%s WHERE id=%s", (new_role, team_member_id))
+        cursor.execute("UPDATE employee SET role=%s WHERE name=%s", (new_role, system_id))
 
-        # 5. Global Data Consistency: Cascade Rename
-        cascade_rename_employee(old_team_member_id, new_team_member_id, cursor)
-
-        # 6. Compliance & Audit: Role History
+        # 4. Compliance & Audit: Role History
         cursor.execute("""
             INSERT INTO role_history (employee_name, old_role, new_role, changed_by_user_id, notes)
             VALUES (%s, %s, %s, %s, %s)
-        """, (new_team_member_id, old_role, new_role, admin_id, 
+        """, (system_id, old_role, new_role, admin_id, 
               f"Role updated by Admin {admin_id}"))
 
-        # 7. Lifecycle Event: Internal Notification
+        # 5. Lifecycle Event: Internal Notification
         cursor.execute("""
             INSERT INTO notifications (employee_name, title, message, type)
             VALUES (%s, %s, %s, 'security_alert')
         """, (
-            new_team_member_id, 
+            system_id, 
             f"{get_label('entity')} Role Updated", 
             get_message("role_updated", 
                        entity=get_label('entity'),
@@ -179,22 +172,22 @@ def update_team_member_role(admin_id, team_member_id, new_role):
                        new_role=new_role.upper())
         ))
 
-        # 8. Audit Logging with modern terminology
+        # 6. Audit Logging with modern terminology
         cursor.execute("""
             INSERT INTO audit_logs (user_id, event_type, description)
             VALUES (%s, %s, %s)
         """, (admin_id, "role_change", 
               get_audit_event("entity_role_changed", 
-                            name=original_name) + f" ({old_role} → {new_role})"))
+                            name=system_id) + f" ({old_role} → {new_role})"))
 
         return {
             "success": True,
-            "message": get_message("updated_with_name", name=original_name),
+            "message": get_message("updated_with_name", name=system_id),
             "data": {
                 "old_role": old_role,
                 "new_role": new_role,
-                "old_id": old_team_member_id,
-                "new_id": new_team_member_id,
+                "old_id": system_id,
+                "new_id": system_id,
                 "reauth_required": True
             }
         }
@@ -313,7 +306,7 @@ def delete_team_member(team_member_id: int, admin_id: int):
     """
     with Transaction() as cursor:
         # Get team member info before deletion
-        cursor.execute("SELECT name, original_name FROM employee WHERE id = %s", (team_member_id,))
+        cursor.execute("SELECT name FROM employee WHERE id = %s", (team_member_id,))
         team_member = cursor.fetchone()
         
         if not team_member:
@@ -330,7 +323,7 @@ def delete_team_member(team_member_id: int, admin_id: int):
             INSERT INTO audit_logs (user_id, event_type, description)
             VALUES (%s, %s, %s)
         """, (admin_id, "team_member_deleted", 
-              get_audit_event("entity_deleted", name=team_member['original_name'])))
+              get_audit_event("entity_deleted", name=team_member['name'])))
     
     return {"success": True, "message": get_message("deleted_success")}
 

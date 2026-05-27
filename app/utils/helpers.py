@@ -4,35 +4,20 @@ from app.utils.display_name_service import strip_all_prefixes, ROLE_PREFIX_MAP
 
 def format_role_name(name, role):
     """
-    Cleans any existing role prefix and applies the correct one.
-    Uses centralized display_name_service for prefix stripping.
-    
-    Prefix standards:
-        Admin -> A_, HR -> HR_, Manager -> M_, Employee/Team Member -> TM_
-    
-    Note: For production, use generate_unique_username which checks DB.
+    DEPRECATED: Now returns the clean name as part of the clean identity architecture.
     """
-    if not name:
-        return name
-    
-    # Remove ALL known role prefixes (including stacked duplicates)
-    name = strip_all_prefixes(name)
-    
-    prefix = ROLE_PREFIX_MAP.get(role.lower(), 'TM') + '_'
-    return f"{prefix}{name}"
+    return strip_all_prefixes(name) if name else name
 
 
 def generate_unique_username(name, role, cursor):
     """
-    Generates a unique prefixed system identity.
-    Uses centralized display_name_service for prefix handling.
+    Generates a unique system identity consisting of the pure, clean name.
+    Role prefixes are no longer used.
     
-    Example: TM_Omkar, TM_Omkar_1, etc.
+    Example: Omkar, Omkar_1, etc.
     """
     clean_name = strip_all_prefixes(name)
-    
-    prefix = ROLE_PREFIX_MAP.get(role.lower(), 'TM') + '_'
-    base_username = f"{prefix}{clean_name}"
+    base_username = clean_name
     
     # Check uniqueness in users table
     cursor.execute("SELECT employee_name FROM users WHERE employee_name = %s", (base_username,))
