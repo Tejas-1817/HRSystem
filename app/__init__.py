@@ -9,8 +9,12 @@ logger = logging.getLogger(__name__)
 def create_app():
     app = Flask(__name__)
     app.url_map.strict_slashes = False
-    CORS(app)
+    frontend_url = os.getenv("FRONTEND_URL", "http://13.205.90.13:5002")
+    CORS(app, origins=[frontend_url, "http://localhost:5002", "http://127.0.0.1:5002"])
     
+    @app.route("/health")
+    def health_check():
+        return jsonify({"success": True, "status": "healthy", "service": "HRMS Backend API"})
     # Load configuration
     app.config.from_object(Config)
 

@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from app.utils.display_name_service import strip_all_prefixes, ROLE_PREFIX_MAP
+from app.utils.display_name_service import strip_all_prefixes
 
 def format_role_name(name, role):
     """
