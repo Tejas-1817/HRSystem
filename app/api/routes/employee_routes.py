@@ -92,6 +92,26 @@ def serialize_employee(rows):
         item["photo_url"] = photo if photo else None
 
         # ─────────────────────────────────────────────────────────────────
+        # New Enterprise HR Fields → camelCase aliases
+        # ─────────────────────────────────────────────────────────────────
+        string_fields = [
+            ("designation", "designation"),
+            ("department", "department"),
+            ("gender", "gender"),
+            ("address", "address"),
+            ("employment_type", "employmentType"),
+            ("team_member_code", "teamMemberCode"),
+            ("created_by", "createdBy"),
+            ("updated_by", "updatedBy"),
+        ]
+        for snake, camel in string_fields:
+            val = item.get(snake)
+            if val is not None:
+                item[camel] = val
+            else:
+                item[camel] = None
+
+        # ─────────────────────────────────────────────────────────────────
         # Display Name Enrichment (full_name + display_name)
         # ─────────────────────────────────────────────────────────────────
         enrich_record_with_display_name(item, name_field="name", role_field="role")
@@ -362,6 +382,7 @@ def update_employee(current_user, emp_id):
         ALLOWED_FIELDS = {
             "name", "phone", "salary",
             "date_of_birth", "date_of_joining", "status", "email",
+            "designation", "department", "gender", "address", "employment_type",
         }
 
         VALID_STATUSES = {"working", "bench", "over_allocated"}

@@ -30,9 +30,49 @@ CREATE TABLE IF NOT EXISTS employee (
     docx_file VARCHAR(255),
     status ENUM('working', 'bench', 'over_allocated') DEFAULT 'bench',
     allow_over_allocation BOOLEAN DEFAULT FALSE,
+    designation VARCHAR(100) NULL,
+    department VARCHAR(100) NULL,
+    gender VARCHAR(30) NULL,
+    address TEXT NULL,
+    employment_type VARCHAR(50) NULL,
+    team_member_code VARCHAR(20) NULL,
+    created_by VARCHAR(100) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100) NULL,
     INDEX idx_doj (date_of_joining),
-    INDEX idx_emp_status (status)
+    INDEX idx_emp_status (status),
+    INDEX idx_emp_department (department),
+    INDEX idx_emp_employment_type (employment_type),
+    INDEX idx_emp_gender (gender),
+    UNIQUE INDEX idx_emp_team_member_code (team_member_code)
+);
+
+-- 🔥 Create departments management table (HR/Admin managed)
+CREATE TABLE IF NOT EXISTS departments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    description VARCHAR(255) NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by VARCHAR(100) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_dept_active (is_active)
+);
+
+-- 🔥 Create designations management table (HR/Admin managed)
+CREATE TABLE IF NOT EXISTS designations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    department_id INT NULL,
+    description VARCHAR(255) NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by VARCHAR(100) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
+    INDEX idx_desig_active (is_active),
+    INDEX idx_desig_dept (department_id)
 );
 
 -- 🔥 Clean up old timesheet table if it exists

@@ -82,6 +82,7 @@ def create_app():
     from app.api.routes.device_routes import device_bp
     from app.api.routes.profile_routes import profile_bp
     from app.api.routes.announcement_routes import announcement_bp
+    from app.api.routes.department_routes import department_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(employee_bp, url_prefix='/employees')

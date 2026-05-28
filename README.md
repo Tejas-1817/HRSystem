@@ -14,7 +14,7 @@ A robust, modular, production‑ready **Human Resource Management System** built
 
 ## ✨ Key Features
 
-- **Employee & Role Management** – Central directory, role‑based naming, audit trail, document verification.
+- **Team Member & Role Management** – Central directory, role‑based naming, audit trail, document verification (Legacy "Employee" terminology fully supported via compatibility layer).
 - **Attendance & Timesheets** – Timesheet‑derived attendance, 8‑hour enforcement, half‑day support.
 - **Leave Management** – Full‑type leave, half‑day, balance tracking, calendar API.
 - **Project & Resource Allocation** – Fixed‑cost & T&M billing, over‑allocation controls.
@@ -107,6 +107,17 @@ All protected routes require `Authorization: Bearer <token>`.
 | GET | `/auth/profile` | All | Current user profile |
 | POST | `/auth/logout` | All | Invalidate token |
 
+### Team Members (`/api/v1/team-members`) - *Recommended*
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| GET | `/api/v1/team-members` | All | List all team members |
+| GET | `/api/v1/team-members/{id}` | All | Get team member details |
+| POST | `/api/v1/team-members` | HR | Create new team member |
+| PATCH | `/api/v1/team-members/{id}` | HR | Update team member |
+| DELETE | `/api/v1/team-members/{id}` | Admin | Soft delete team member |
+
+*Note: Legacy `/api/v1/employees` endpoints are fully supported for backward compatibility.*
+
 *(Full list continues in the original README – kept for brevity.)*
 
 ---
@@ -146,6 +157,15 @@ python database/migrations/run_009.py
 python database/migrations/run_010.py
 python database/migrations/run_011.py
 ```
+
+---
+
+## 🔄 Terminology Refactor
+The backend has been refactored to use "**Team Member**" instead of "**Employee**" for modern enterprise terminology. This was achieved with **zero breaking changes**. 
+- Modern endpoints available at `/api/v1/team-members`
+- Legacy `/api/v1/employees` endpoints fully supported.
+- Database tables (like `employee`) and schema remain unchanged for stability.
+- See [TERMINOLOGY_REFACTOR.md](TERMINOLOGY_REFACTOR.md) and [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for details.
 
 ---
 

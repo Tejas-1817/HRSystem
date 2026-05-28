@@ -128,3 +128,43 @@ INSERT IGNORE INTO leave_config (leave_type, default_total, description) VALUES
 ('sick',   12,  'Medical / health related leave'),
 ('casual', 10,  'Personal / casual leave'),
 ('earned', 15,  'Earned / privilege leave (carry-forward eligible)');
+
+-- 🔥 Seed Default Departments (for dynamic dropdown management)
+INSERT IGNORE INTO departments (name, description, created_by) VALUES
+('Engineering',            'Software development and technical operations',  'system'),
+('HR',                     'Human Resources and people management',          'system'),
+('Finance',                'Financial operations and accounting',            'system'),
+('Recruitment',            'Talent acquisition and hiring',                  'system'),
+('Operations',             'Business operations and logistics',              'system'),
+('Marketing',              'Marketing and brand management',                 'system'),
+('Sales',                  'Sales and business development',                 'system'),
+('Legal',                  'Legal and compliance',                           'system'),
+('IT',                     'IT infrastructure and support',                  'system'),
+('Administration',         'General administration and office management',   'system'),
+('Product',                'Product management and strategy',                'system'),
+('Design',                 'UI/UX and graphic design',                       'system'),
+('Quality Assurance',      'Testing and quality control',                    'system'),
+('Customer Support',       'Customer service and support',                   'system'),
+('Research & Development', 'R&D and innovation',                             'system');
+
+-- 🔥 Seed Default Designations (for dynamic dropdown management)
+INSERT IGNORE INTO designations (name, description, created_by) VALUES
+('Software Engineer',        'Develops and maintains software applications',         'system'),
+('Senior Software Engineer', 'Senior-level software development role',               'system'),
+('HR Executive',             'Handles human resource operations',                    'system'),
+('HR Manager',               'Manages the HR department and policies',               'system'),
+('Project Manager',          'Oversees project planning and delivery',               'system'),
+('Recruiter',                'Handles talent acquisition and hiring',                'system'),
+('Senior Developer',         'Senior software development role',                     'system'),
+('Team Lead',                'Leads a team of developers or specialists',            'system'),
+('QA Engineer',              'Quality assurance and testing',                        'system'),
+('DevOps Engineer',          'Infrastructure and deployment automation',             'system'),
+('Business Analyst',         'Analyzes business processes and requirements',         'system'),
+('Product Manager',          'Manages product strategy and roadmap',                 'system'),
+('Technical Lead',           'Technical leadership and architecture',                'system'),
+('Data Analyst',             'Data analysis and insights',                           'system'),
+('UI/UX Designer',           'User interface and experience design',                 'system'),
+('System Administrator',     'System and infrastructure management',                 'system'),
+('Intern',                   'Internship/training position',                         'system'),
+('Trainee',                  'Entry-level training position',                        'system');
+

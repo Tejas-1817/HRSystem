@@ -34,6 +34,10 @@ from app.services.team_member_service import (
     delete_team_member
 )
 from app.config.terminology import get_message, get_label, get_audit_event
+from app.config.constants import (
+    is_valid_gender, is_valid_employment_type,
+    get_genders_list, get_employment_types_list,
+)
 from app.utils.display_name_service import enrich_record_with_display_name
 import mysql.connector
 
@@ -109,6 +113,26 @@ def serialize_team_member(rows):
         # ─────────────────────────────────────────────────────────────────
         photo = item.get("photo")
         item["photo_url"] = photo if photo else None
+
+        # ─────────────────────────────────────────────────────────────────
+        # New Enterprise HR Fields → camelCase aliases
+        # ─────────────────────────────────────────────────────────────────
+        string_fields = [
+            ("designation", "designation"),
+            ("department", "department"),
+            ("gender", "gender"),
+            ("address", "address"),
+            ("employment_type", "employmentType"),
+            ("team_member_code", "teamMemberCode"),
+            ("created_by", "createdBy"),
+            ("updated_by", "updatedBy"),
+        ]
+        for snake, camel in string_fields:
+            val = item.get(snake)
+            if val is not None:
+                item[camel] = val
+            else:
+                item[camel] = None
 
         # ─────────────────────────────────────────────────────────────────
         # Display Name Enrichment (full_name + display_name)
@@ -225,9 +249,14 @@ def create_new_team_member(current_user):
         date_of_birth: DOB in YYYY-MM-DD format (optional)
         date_of_joining: DOJ in YYYY-MM-DD format (optional)
         role: User role (admin, hr, manager, team_member) (default: team_member)
+        designation: Job title (optional)
+        department: Department name (optional)
+        gender: Gender (optional, validated)
+        address: Full address (optional)
+        employment_type: Employment category (optional, validated)
     
     Returns:
-        Newly created team member record
+        Newly created team member record with auto-generated team_member_code
     """
     try:
         data = request.get_json()
@@ -248,11 +277,30 @@ def create_new_team_member(current_user):
                 "error": get_message("required_field", field="Email")
             }), 400
         
+        # Validate gender if provided
+        gender = data.get("gender")
+        if gender and not is_valid_gender(gender):
+            return jsonify({
+                "success": False,
+                "error": f"Invalid gender: '{gender}'. Allowed: {', '.join(get_genders_list())}"
+            }), 400
+        
+        # Validate employment_type if provided
+        emp_type = data.get("employment_type")
+        if emp_type and not is_valid_employment_type(emp_type):
+            return jsonify({
+                "success": False,
+                "error": f"Invalid employment type: '{emp_type}'. Allowed: {', '.join(get_employment_types_list())}"
+            }), 400
+        
         role = data.get("role", "team_member")
         
         with Transaction() as cursor:
             try:
-                team_member_id, original_name = create_team_member_record(data, role, cursor)
+                team_member_id, original_name = create_team_member_record(
+                    data, role, cursor,
+                    created_by=current_user.get("employee_name")
+                )
             except ValueError as ve:
                 return jsonify({"success": False, "error": str(ve)}), 400
         
@@ -286,6 +334,11 @@ def update_single_team_member(current_user, team_member_id):
         salary: New salary (optional)
         date_of_birth: New DOB (optional)
         date_of_joining: New DOJ (optional)
+        designation: New designation (optional)
+        department: New department (optional)
+        gender: New gender (optional, validated)
+        address: New address (optional)
+        employment_type: New employment type (optional, validated)
     
     Returns:
         Updated team member record
@@ -296,7 +349,26 @@ def update_single_team_member(current_user, team_member_id):
         if not data:
             return jsonify({"success": False, "error": "Request body required"}), 400
         
-        updated_team_member = update_team_member(team_member_id, data)
+        # Validate gender if provided
+        gender = data.get("gender")
+        if gender and not is_valid_gender(gender):
+            return jsonify({
+                "success": False,
+                "error": f"Invalid gender: '{gender}'. Allowed: {', '.join(get_genders_list())}"
+            }), 400
+        
+        # Validate employment_type if provided
+        emp_type = data.get("employment_type")
+        if emp_type and not is_valid_employment_type(emp_type):
+            return jsonify({
+                "success": False,
+                "error": f"Invalid employment type: '{emp_type}'. Allowed: {', '.join(get_employment_types_list())}"
+            }), 400
+        
+        updated_team_member = update_team_member(
+            team_member_id, data,
+            updated_by=current_user.get("employee_name")
+        )
         updated_team_member = serialize_team_member(updated_team_member)
         
         return jsonify({

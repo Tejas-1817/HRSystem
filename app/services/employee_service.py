@@ -22,14 +22,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_TEMP_PASSWORD = "Welcome@123"
 
 
-def create_employee_record(data, role, cursor, with_user=True):
+def create_employee_record(data, role, cursor, with_user=True, created_by=None):
     """
     DEPRECATED: Use app.services.team_member_service.create_team_member_record
     
     Core logic to create an employee record and optionally a linked user account.
     Must be called within a database transaction.
     
-    This function maintains backward compatibility by delegating to team_member_service.
+    This function maintains backward compatibility by implementing the same logic
+    as team_member_service, including the new enterprise HR fields.
     """
     # Strip ALL known role prefixes (including A_, HR_, duplicates like A_A_)
     raw_name = data.get("name", "") or data.get("employee_name", "")
@@ -51,15 +52,47 @@ def create_employee_record(data, role, cursor, with_user=True):
     if not email:
         raise ValueError(get_message("required_field", field="Email") + " (required for creation and login setup)")
     
-    # 1. Insert employee record
+    # Extract new HR fields (backward compat: these are optional)
+    designation = data.get("designation")
+    department = data.get("department")
+    gender = data.get("gender")
+    address = data.get("address")
+    employment_type = data.get("employment_type")
+    
+    # Auto-generate team member code
+    from datetime import datetime
+    year = datetime.now().year
+    pattern = f"TM-{year}-%"
+    cursor.execute(
+        "SELECT team_member_code FROM employee "
+        "WHERE team_member_code LIKE %s "
+        "ORDER BY team_member_code DESC LIMIT 1",
+        (pattern,)
+    )
+    last = cursor.fetchone()
+    if last:
+        last_code = last['team_member_code'] if isinstance(last, dict) else last[0]
+        try:
+            last_num = int(last_code.split('-')[-1])
+            next_num = last_num + 1
+        except (ValueError, IndexError):
+            next_num = 1
+    else:
+        next_num = 1
+    team_member_code = f"TM-{year}-{next_num:04d}"
+    
+    # 1. Insert employee record (with new HR fields)
     cursor.execute("""
         INSERT INTO employee 
-        (name, email, phone, salary, date_of_birth, date_of_joining, photo, pdf_file, docx_file)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (name, email, phone, salary, date_of_birth, date_of_joining, photo, pdf_file, docx_file,
+         designation, department, gender, address, employment_type, team_member_code, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         employee_name, email, data.get("phone"),
         data.get("salary"), dob, doj, data.get("photo_path"), 
-        data.get("pdf_path"), data.get("docx_path")
+        data.get("pdf_path"), data.get("docx_path"),
+        designation, department, gender, address, employment_type,
+        team_member_code, created_by
     ))
     
     # 2. Allocate leaves

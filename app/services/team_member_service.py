@@ -12,11 +12,18 @@ Usage:
 
 from werkzeug.security import generate_password_hash
 import re
+from datetime import datetime
 from app.models.database import execute_query, execute_single, Transaction
 from app.services.leave_service import allocate_default_leaves
 from app.utils.helpers import generate_unique_username, cascade_rename_employee, log_audit_event
 from app.utils.display_name_service import strip_all_prefixes
 from app.config.terminology import get_message, get_label, get_audit_event
+from app.config.constants import (
+    is_valid_gender, is_valid_employment_type,
+    TEAM_MEMBER_CODE_PREFIX, TEAM_MEMBER_CODE_FORMAT,
+    MAX_DESIGNATION_LENGTH, MAX_DEPARTMENT_LENGTH,
+    MAX_ADDRESS_LENGTH, MAX_EMPLOYMENT_TYPE_LENGTH,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,7 +35,92 @@ DEFAULT_TEMP_PASSWORD = "Welcome@123"
 # PRIMARY SERVICE FUNCTIONS (Team Member terminology)
 # ═════════════════════════════════════════════════════════════════════════
 
-def create_team_member_record(data, role, cursor, with_user=True):
+def generate_team_member_code(cursor):
+    """
+    Generate a unique team member code in TM-YYYY-NNNN format.
+    
+    Example: TM-2026-0001, TM-2026-0002
+    
+    Args:
+        cursor: Database cursor (must be from an active transaction)
+    
+    Returns:
+        Unique team member code string
+    """
+    year = datetime.now().year
+    prefix = TEAM_MEMBER_CODE_PREFIX
+    pattern = f"{prefix}-{year}-%"
+    
+    cursor.execute(
+        "SELECT team_member_code FROM employee "
+        "WHERE team_member_code LIKE %s "
+        "ORDER BY team_member_code DESC LIMIT 1",
+        (pattern,)
+    )
+    last = cursor.fetchone()
+    
+    if last:
+        last_code = last['team_member_code'] if isinstance(last, dict) else last[0]
+        try:
+            last_num = int(last_code.split('-')[-1])
+            next_num = last_num + 1
+        except (ValueError, IndexError):
+            next_num = 1
+    else:
+        next_num = 1
+    
+    return TEAM_MEMBER_CODE_FORMAT.format(
+        prefix=prefix, year=year, number=next_num
+    )
+
+
+def validate_team_member_fields(data):
+    """
+    Validate the new enterprise HR fields before insertion.
+    
+    Args:
+        data: Dictionary containing team member fields
+    
+    Raises:
+        ValueError: If any field fails validation
+    """
+    # Validate gender
+    gender = data.get("gender")
+    if gender and not is_valid_gender(gender):
+        raise ValueError(
+            f"Invalid gender: '{gender}'. "
+            f"Allowed values: Male, Female, Other, Prefer Not to Say"
+        )
+    
+    # Validate employment_type
+    emp_type = data.get("employment_type")
+    if emp_type and not is_valid_employment_type(emp_type):
+        raise ValueError(
+            f"Invalid employment type: '{emp_type}'. "
+            f"Allowed values: Full Time, Intern, Contract Based, Part Time, Freelancer, Temporary"
+        )
+    
+    # Validate field lengths
+    designation = data.get("designation")
+    if designation and len(designation) > MAX_DESIGNATION_LENGTH:
+        raise ValueError(
+            f"Designation must not exceed {MAX_DESIGNATION_LENGTH} characters"
+        )
+    
+    department = data.get("department")
+    if department and len(department) > MAX_DEPARTMENT_LENGTH:
+        raise ValueError(
+            f"Department must not exceed {MAX_DEPARTMENT_LENGTH} characters"
+        )
+    
+    address = data.get("address")
+    if address and len(address) > MAX_ADDRESS_LENGTH:
+        raise ValueError(
+            f"Address must not exceed {MAX_ADDRESS_LENGTH} characters"
+        )
+
+
+def create_team_member_record(data, role, cursor, with_user=True, created_by=None):
     """
     Core logic to create a team member record and optionally a linked user account.
     
@@ -42,6 +134,7 @@ def create_team_member_record(data, role, cursor, with_user=True):
         role: User role (admin, hr, manager, team_member)
         cursor: Database cursor (must be from an active transaction)
         with_user: Whether to create associated user account
+        created_by: System ID of the user creating this team member
     
     Returns:
         Tuple of (team_member_system_id, original_name)
@@ -69,15 +162,31 @@ def create_team_member_record(data, role, cursor, with_user=True):
     if not email:
         raise ValueError(get_message("required_field", field="Email") + " (required for team member creation and login setup)")
     
+    # Validate new enterprise HR fields
+    validate_team_member_fields(data)
+    
+    # Extract new HR fields
+    designation = data.get("designation")
+    department = data.get("department")
+    gender = data.get("gender")
+    address = data.get("address")
+    employment_type = data.get("employment_type")
+    
+    # Auto-generate team member code
+    team_member_code = generate_team_member_code(cursor)
+    
     # 1. Insert team member record (uses "employee" table for production stability)
     cursor.execute("""
         INSERT INTO employee 
-        (name, email, phone, salary, date_of_birth, date_of_joining, photo, pdf_file, docx_file)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (name, email, phone, salary, date_of_birth, date_of_joining, photo, pdf_file, docx_file,
+         designation, department, gender, address, employment_type, team_member_code, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         team_member_id, email, data.get("phone"),
         data.get("salary"), dob, doj, data.get("photo_path"), 
-        data.get("pdf_path"), data.get("docx_path")
+        data.get("pdf_path"), data.get("docx_path"),
+        designation, department, gender, address, employment_type,
+        team_member_code, created_by
     ))
     
     # 2. Allocate leaves
@@ -97,6 +206,11 @@ def create_team_member_record(data, role, cursor, with_user=True):
     log_audit_event(
         event_type="team_member_created",
         description=get_audit_event("entity_created", name=clean_name)
+    )
+    
+    logger.info(
+        f"Team member created: {team_member_id} | Code: {team_member_code} | "
+        f"Dept: {department} | Designation: {designation} | Type: {employment_type}"
     )
     
     return team_member_id, clean_name
@@ -258,24 +372,35 @@ def list_team_members(role_filter=None, status_filter=None, limit=None, offset=0
     return execute_query(query, params)
 
 
-def update_team_member(team_member_id: int, update_data: dict):
+def update_team_member(team_member_id: int, update_data: dict, updated_by: str = None):
     """
     Update team member profile information.
     
     Args:
         team_member_id: Team member database ID
         update_data: Dictionary of fields to update
+        updated_by: System ID of the user making the update
     
     Returns:
         Updated team member record
     """
-    allowed_fields = ['email', 'phone', 'salary', 'date_of_birth', 'date_of_joining', 'photo']
+    allowed_fields = [
+        'email', 'phone', 'salary', 'date_of_birth', 'date_of_joining', 'photo',
+        'designation', 'department', 'gender', 'address', 'employment_type',
+    ]
     
     # Filter to allowed fields
     updates = {k: v for k, v in update_data.items() if k in allowed_fields}
     
     if not updates:
         raise ValueError("No valid fields to update")
+    
+    # Validate new HR fields if present
+    validate_team_member_fields(updates)
+    
+    # Add updated_by audit field
+    if updated_by:
+        updates['updated_by'] = updated_by
     
     # Build dynamic UPDATE query
     set_clause = ", ".join([f"{k} = %s" for k in updates.keys()])
