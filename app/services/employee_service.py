@@ -94,6 +94,7 @@ def create_employee_record(data, role, cursor, with_user=True, created_by=None):
         designation, department, gender, address, employment_type,
         team_member_code, created_by
     ))
+    employee_id = cursor.lastrowid
     
     # 2. Allocate leaves
     allocate_default_leaves(employee_name, cursor)
@@ -107,6 +108,12 @@ def create_employee_record(data, role, cursor, with_user=True, created_by=None):
             INSERT INTO users (username, password, role, employee_name, password_change_required, is_active)
             VALUES (%s, %s, %s, %s, TRUE, TRUE)
         """, (sanitized_username, hashed_password, role, employee_name))
+    
+    # 3b. Insert into pending welcome emails
+    cursor.execute("""
+        INSERT INTO pending_welcome_emails (employee_id)
+        VALUES (%s)
+    """, (employee_id,))
     
     # Log audit event with modern terminology
     log_audit_event(

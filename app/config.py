@@ -22,7 +22,7 @@ class Config:
     MAIL_USE_TLS = os.getenv("MAIL_USE_TLS", "True").lower() == "true"
     MAIL_USERNAME = os.getenv("MAIL_USERNAME", "your-email@gmail.com")
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "your-app-password")
-    MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", "HRMS Support <your-email@gmail.com>")
+    MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", "Shruti Jadhav <shruti.jadhavjs@gmail.com>")
 
     # Frontend URL (used in password reset emails, leave notifications, etc.)
     # MUST be set to the public/production URL in .env on deployed environments.

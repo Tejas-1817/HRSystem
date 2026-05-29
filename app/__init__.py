@@ -83,6 +83,7 @@ def create_app():
     from app.api.routes.profile_routes import profile_bp
     from app.api.routes.announcement_routes import announcement_bp
     from app.api.routes.department_routes import department_bp
+    from app.api.routes.welcome_email_routes import welcome_email_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(employee_bp, url_prefix='/employees')
@@ -93,6 +94,7 @@ def create_app():
     app.register_blueprint(leave_bp, url_prefix='/leaves')
     app.register_blueprint(document_bp, url_prefix='/documents')
     app.register_blueprint(report_bp, url_prefix='/reports')
+    app.register_blueprint(welcome_email_bp)  # Serves /pending-welcome-emails and /send-welcome-emails directly at the root
     app.register_blueprint(birthday_bp, url_prefix='/birthdays')
     app.register_blueprint(holiday_bp, url_prefix='/holidays')
     app.register_blueprint(notification_bp, url_prefix='/notifications')

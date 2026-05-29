@@ -332,11 +332,16 @@ def add_employee(current_user):
             # Atomic creation of employee and leaves
             employee_name, original_name = create_employee_record(data, role, cursor)
 
+        # Retrieve new employee's database ID for the frontend welcome email prompt
+        new_emp_row = execute_single("SELECT id FROM employee WHERE name = %s", (employee_name,))
+        new_emp_id = new_emp_row["id"] if new_emp_row else None
+
         from app.services.employee_service import DEFAULT_TEMP_PASSWORD
         username = data.get("email") or data.get("username")
         logger.info(f"HR {current_user['employee_name']} successfully added employee {employee_name} with login: {username}")
         return jsonify({
             "success": True, 
+            "id": new_emp_id,
             "message": f"Employee added as {employee_name}. Login username: {username} (Default Password: {DEFAULT_TEMP_PASSWORD})"
         }), 201
 
