@@ -3,7 +3,7 @@ import sys
 import os
 
 # Configuration
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://13.205.90.13:5002"
 ADMIN_USER = {"username": "admin@hr.com", "password": "Admin@123"}
 HR_USER = {"username": "saurabh@gmail.com", "password": "Saurabh@123"} # Based on previous search results
 
