@@ -26,7 +26,7 @@ class Config:
 
     # Frontend URL (used in password reset emails, leave notifications, etc.)
     # MUST be set to the public/production URL in .env on deployed environments.
-    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5002")
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://13.205.90.13:5002/")
 
     @staticmethod
     def get_db_config():
