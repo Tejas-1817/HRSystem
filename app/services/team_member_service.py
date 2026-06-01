@@ -187,7 +187,7 @@ def create_team_member_record(data, role, cursor, with_user=True, created_by=Non
         data.get("pdf_path"), data.get("docx_path"),
         data.get("designation"), data.get("department"),
         data.get("gender"), data.get("address"), 
-        data.get("employment_type"),
+        data.get("employment_type"), team_member_code, created_by
        
     ))
     
