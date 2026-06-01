@@ -58,7 +58,7 @@ def _resolve_manager_name_from_payload(data):
     Returns a validated manager employee_name or None.
     """
     assigned_manager_id = data.get("assigned_manager_id")
-    manager_name = data.get("manager_name") or data.get("assigned_manager_name")
+    manager_name = data.get("manager_name") or data.get("assigned_manager_name") or data.get("assigned_manager")
 
     if assigned_manager_id not in (None, ""):
         manager = execute_single(
@@ -315,7 +315,18 @@ def update_project(current_user, project_id):
         manager_name = project.get("manager_name")
         if current_user["role"] == "hr":
             resolved = _resolve_manager_name_from_payload(data)
-            if "assigned_manager_id" in data or "manager_name" in data or "assigned_manager_name" in data:
+            manager_keys_sent = any(
+                data.get(k) not in (None, "")
+                for k in (
+                    "assigned_manager_id",
+                    "manager_name",
+                    "assigned_manager_name",
+                    "assigned_manager",
+                )
+            )
+            if manager_keys_sent:
+                if resolved is None:
+                    return jsonify({"success": False, "error": "Invalid or missing project manager."}), 400
                 manager_name = resolved
 
         update_fields = {
