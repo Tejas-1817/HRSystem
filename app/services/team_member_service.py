@@ -185,8 +185,10 @@ def create_team_member_record(data, role, cursor, with_user=True, created_by=Non
         team_member_id, email, data.get("phone"),
         data.get("salary"), dob, doj, data.get("photo_path"), 
         data.get("pdf_path"), data.get("docx_path"),
-        designation, department, gender, address, employment_type,
-        team_member_code, created_by
+        data.get("designation"), data.get("department"),
+        data.get("gender"), data.get("address"), 
+        data.get("employment_type"),
+       
     ))
     
     # 2. Allocate leaves
@@ -386,7 +388,7 @@ def update_team_member(team_member_id: int, update_data: dict, updated_by: str =
     """
     allowed_fields = [
         'email', 'phone', 'salary', 'date_of_birth', 'date_of_joining', 'photo',
-        'designation', 'department', 'gender', 'address', 'employment_type',
+        'designation', 'department', 'gender', 'address','reporting_manager', 'employment_type',
     ]
     
     # Filter to allowed fields
