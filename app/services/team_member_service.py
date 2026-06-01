@@ -179,15 +179,15 @@ def create_team_member_record(data, role, cursor, with_user=True, created_by=Non
     cursor.execute("""
         INSERT INTO employee 
         (name, email, phone, salary, date_of_birth, date_of_joining, photo, pdf_file, docx_file,
-         designation, department, gender, address, employment_type, team_member_code, created_by)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         designation, department, gender, address, employment_type)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         team_member_id, email, data.get("phone"),
         data.get("salary"), dob, doj, data.get("photo_path"), 
         data.get("pdf_path"), data.get("docx_path"),
         data.get("designation"), data.get("department"),
         data.get("gender"), data.get("address"), 
-        data.get("employment_type"), team_member_code, created_by
+        data.get("employment_type")
        
     ))
     
