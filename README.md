@@ -145,6 +145,14 @@ The system uses **27 tables** with foreign‑key relationships. Highlights:
 | `006` | `database/migrations/006_device_management.sql` | Asset framework & images |
 | `007` | `database/migrations/007_device_acceptance.sql` | Regulatory sign‑off ledger |
 | `008` | `database/migrations/008_asset_soft_delete.sql` | Soft‑delete safety guards |
+| `009` | `database/migrations/009_timesheet_approval_workflow.sql` | Timesheet approval workflow |
+| `010` | `database/migrations/010_inventory_management.sql` | Inventory & stock management |
+| `011` | `database/migrations/011_leave_approval_workflow.sql` | Leave approval workflow |
+| `012` | `database/migrations/012_announcement_management.sql` | Announcement management |
+| `013` | `database/migrations/013_fix_name_prefixes.sql` | Role and name prefix removal |
+| `014` | `database/migrations/014_timesheet_edit_history.sql` | Timesheet edit history tracking |
+| `015` | `database/migrations/015_clean_identity_architecture.sql` | Clean identity architecture |
+| `016` | `database/migrations/016_team_member_info_fields.sql` | Additional team member HR fields |
 
 Run migrations safely (MySQL‑compatible):
 ```bash
@@ -156,6 +164,11 @@ python database/migrations/run_006.py
 python database/migrations/run_009.py
 python database/migrations/run_010.py
 python database/migrations/run_011.py
+python database/migrations/run_012.py
+python database/migrations/run_013.py
+python database/migrations/run_014.py
+python database/migrations/run_015.py
+python database/migrations/run_016.py
 ```
 
 ---
