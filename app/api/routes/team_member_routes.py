@@ -299,7 +299,8 @@ def create_new_team_member(current_user):
             try:
                 team_member_id, original_name = create_team_member_record(
                     data, role, cursor,
-                    created_by=current_user.get("employee_name")
+                    created_by=current_user.get("employee_name"),
+                    user_id=current_user.get("user_id", 0)
                 )
             except ValueError as ve:
                 return jsonify({"success": False, "error": str(ve)}), 400

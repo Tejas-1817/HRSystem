@@ -120,7 +120,7 @@ def validate_team_member_fields(data):
         )
 
 
-def create_team_member_record(data, role, cursor, with_user=True, created_by=None):
+def create_team_member_record(data, role, cursor, with_user=True, created_by=None, user_id=0):
     """
     Core logic to create a team member record and optionally a linked user account.
     
@@ -205,6 +205,7 @@ def create_team_member_record(data, role, cursor, with_user=True, created_by=Non
     
     # 4. Log audit event with modern terminology
     log_audit_event(
+        user_id,
         event_type="team_member_created",
         description=get_audit_event("entity_created", name=clean_name)
     )

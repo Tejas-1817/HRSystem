@@ -330,7 +330,10 @@ def add_employee(current_user):
 
         with Transaction() as cursor:
             # Atomic creation of employee and leaves
-            employee_name, original_name = create_employee_record(data, role, cursor)
+            employee_name, original_name = create_employee_record(
+                data, role, cursor,
+                user_id=current_user.get("user_id", 0)
+            )
 
         from app.services.employee_service import DEFAULT_TEMP_PASSWORD
         username = data.get("email") or data.get("username")

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TEMP_PASSWORD = "Welcome@123"
 
 
-def create_employee_record(data, role, cursor, with_user=True, created_by=None):
+def create_employee_record(data, role, cursor, with_user=True, created_by=None, user_id=0):
     """
     DEPRECATED: Use app.services.team_member_service.create_team_member_record
     
@@ -110,6 +110,7 @@ def create_employee_record(data, role, cursor, with_user=True, created_by=None):
     
     # Log audit event with modern terminology
     log_audit_event(
+        user_id,
         event_type="team_member_created",
         description=f"Team member created: {clean_name}"
     )
