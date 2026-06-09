@@ -73,41 +73,48 @@ def register(current_user):
 def login():
     try:
         data = request.get_json() or {}
-        username = data.get("username", "").strip()
+        login_id = (data.get("email") or data.get("username") or "").strip().lower()
         password = data.get("password", "") # Passwords should NOT be stripped
         
-        if not username or not password:
-            return jsonify({"success": False, "error": "Missing username or password"}), 400
+        if not login_id or not password:
+            return jsonify({"success": False, "error": "Missing email/username or password"}), 400
 
-        # Dual Login: Check both username and email
+        # Dual-read: query by both new email column and legacy username column
         query = """
-            SELECT u.* FROM users u
-            LEFT JOIN employee e ON u.employee_name = e.name
-            WHERE (u.username = %s OR e.email = %s)
+            SELECT u.*, e.name as employee_name
+            FROM users u
+            LEFT JOIN employee e ON u.employee_id = e.id
+            WHERE (u.email = %s OR u.username = %s)
             AND (u.is_active IS NULL OR u.is_active = TRUE)
             LIMIT 1
         """
-        user = execute_single(query, (username, username))
-        
-        if not user or not check_password_hash(user["password"], password):
-            return jsonify({"success": False, "error": "Invalid username or password"}), 401
+        user = execute_single(query, (login_id, login_id))
+
+        if not user:
+            return jsonify({"success": False, "error": "Invalid email/username or password"}), 401
+
+        # Dual-read password: try password_hash first, fallback to password
+        stored_hash = user.get("password_hash") or user.get("password")
+        if not stored_hash or not check_password_hash(stored_hash, password):
+            return jsonify({"success": False, "error": "Invalid email/username or password"}), 401
+
+        # JWT username = email (new), fallback to username (legacy)
+        jwt_username = user.get("email") or user.get("username") or ""
+        jwt_employee_name = user.get("employee_name") or ""
 
         token = jwt.encode({
             "user_id": user["id"],
-            "username": user["username"],
+            "username": jwt_username,
             "role": user["role"],
-            "employee_name": user["employee_name"],
-            "password_change_required": bool(user["password_change_required"]),
+            "employee_name": jwt_employee_name,
+            "password_change_required": bool(user.get("password_change_required", False)),
             "exp": datetime.utcnow() + timedelta(hours=8)
         }, Config.JWT_SECRET, algorithm="HS256")
 
         if isinstance(token, bytes): token = token.decode("utf-8")
 
         # Resolve clean display names for the response
-        original_name_row = execute_single(
-            "SELECT original_name FROM users WHERE id = %s", (user["id"],)
-        )
-        clean_name = (original_name_row or {}).get("original_name") or get_clean_name(user["employee_name"])
+        clean_name = get_clean_name(jwt_employee_name) if jwt_employee_name else jwt_username
 
         return jsonify({
             "success": True,
@@ -115,12 +122,12 @@ def login():
             "token": token,
             "user": {
                 "id": user["id"],
-                "username": user["username"],
+                "username": jwt_username,
                 "role": user["role"],
-                "employee_name": user["employee_name"],
+                "employee_name": jwt_employee_name,
                 "full_name": clean_name,
                 "display_name": get_display_name(clean_name, user["role"]),
-                "password_change_required": user["password_change_required"]
+                "password_change_required": user.get("password_change_required", False)
             }
         }), 200
     except mysql.connector.Error as db_err:

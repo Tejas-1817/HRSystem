@@ -1,14 +1,15 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- Migration 017: Onboarding Module + Users Table Alignment
+-- Migration 017: Onboarding Module + Users Table Additive Columns
 -- ═══════════════════════════════════════════════════════════════════════════
 --
--- Phase 1 — Users Table Refactoring (DDL only; data migration in run_017.py):
+-- Phase 1 — Users Table Additive Changes (data migration in run_017.py):
 --   - Add email (VARCHAR 255 UNIQUE), migrate from username
 --   - Add password_hash (VARCHAR 255), migrate from password
 --   - Add employee_id (FK to employee.id), migrate from employee_name
 --   - Convert role VARCHAR(50) → ENUM with 'onboarding_candidate'
---   - Drop legacy columns: username, password, employee_name,
---     password_change_required, reset_token, reset_token_expiry
+--   - Legacy columns (username, password, employee_name,
+--     password_change_required, reset_token, reset_token_expiry)
+--     are PRESERVED for auth system backward compatibility.
 --
 -- Phase 2 — Onboarding Module (5 new tables):
 --   - onboarding_joinee       — Core joinee record, UUID-based, status workflow
@@ -25,10 +26,15 @@
 USE hrms;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- PHASE 1: USERS TABLE REFACTORING
--- Note: Data migration (UPDATE) between ADD COLUMN and MODIFY/DROP is
+-- PHASE 1: USERS TABLE — ADDITIVE CHANGES ONLY
+-- Note: Data migration (UPDATE) between ADD COLUMN and MODIFY is
 -- handled by run_017.py. The ALTER statements below are idempotent with
--- IF [NOT] EXISTS guards and are safe to run standalone for new installs.
+-- IF [NOT] EXISTS guards.
+--
+-- IMPORTANT: Legacy columns (username, password, employee_name,
+-- password_change_required, reset_token, reset_token_expiry) are
+-- PRESERVED — the auth system still reads from them. A future migration
+-- can drop them once all code references are migrated to the new columns.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- 1a. Add email column (nullable first; data copied + NOT NULL set in Python)
@@ -46,14 +52,6 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id INT NULL;
 --     NOT NULL DEFAULT 'employee';
 
 -- 1e. Add FK to employee (handled in Python after data migration)
-
--- 1f. Drop legacy columns (handled in Python after data migration)
--- ALTER TABLE users DROP COLUMN IF EXISTS username;
--- ALTER TABLE users DROP COLUMN IF EXISTS password;
--- ALTER TABLE users DROP COLUMN IF EXISTS employee_name;
--- ALTER TABLE users DROP COLUMN IF EXISTS password_change_required;
--- ALTER TABLE users DROP COLUMN IF EXISTS reset_token;
--- ALTER TABLE users DROP COLUMN IF EXISTS reset_token_expiry;
 
 
 -- ═══════════════════════════════════════════════════════════════════════════

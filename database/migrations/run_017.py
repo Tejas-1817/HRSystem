@@ -1,13 +1,14 @@
 """
-Migration 017: Onboarding Module + Users Table Alignment
-─────────────────────────────────────────────────────────
-Phase 1 — Users Table Refactoring:
+Migration 017: Onboarding Module + Users Table Additive Columns
+───────────────────────────────────────────────────────────────
+Phase 1 — Users Table Additive Changes:
   - Add email column, migrate from username, set UNIQUE NOT NULL
   - Add password_hash column, migrate from password, set NOT NULL
   - Add employee_id FK column, populate via JOIN, add FK constraint
   - Convert role VARCHAR(50) → ENUM with 'onboarding_candidate'
-  - Drop legacy columns: username, password, employee_name,
-    password_change_required, reset_token, reset_token_expiry
+  - Legacy columns (username, password, employee_name,
+    password_change_required, reset_token, reset_token_expiry)
+    are PRESERVED for auth system backward compatibility.
 
 Phase 2 — Onboarding Module (5 new tables):
   - onboarding_joinee, onboarding_declaration, onboarding_references,
@@ -40,10 +41,6 @@ logger = logging.getLogger(__name__)
 # ─── Helpers ─────────────────────────────────────────────────────────────
 
 ROLE_ENUM_VALUES = ['admin', 'hr', 'manager', 'employee', 'team_member', 'onboarding_candidate']
-LEGACY_COLUMNS = [
-    'username', 'password', 'employee_name',
-    'password_change_required', 'reset_token', 'reset_token_expiry',
-]
 
 
 def _col_exists(cursor, table, column):
@@ -306,31 +303,13 @@ def phase1_users_refactor(cursor, dry_run=False):
     else:
         logger.info("    ⏭️  Skip — role column does not exist")
 
-    # ── Step 5: Drop legacy columns ────────────────────────────────
-    logger.info("\n  Step 5: Dropping legacy columns...")
-    for col in LEGACY_COLUMNS:
-        if _col_exists(cursor, 'users', col):
-            if not dry_run:
-                cursor.execute(f"ALTER TABLE users DROP COLUMN {col}")
-                logger.info(f"    ✅ Dropped column '{col}'")
-            else:
-                logger.info(f"    [DRY-RUN] Would drop column '{col}'")
-        else:
-            logger.info(f"    ✅ Column '{col}' already gone — skipping")
-
-    # ── Step 6: Drop legacy indexes if any remain ──────────────────
-    logger.info("\n  Step 6: Cleaning up legacy indexes...")
-    legacy_indexes = ['username']
-    for idx_col in legacy_indexes:
-        idx_name = idx_col
-        if _index_exists(cursor, 'users', idx_name):
-            if not dry_run:
-                cursor.execute(f"ALTER TABLE users DROP INDEX {idx_name}")
-                logger.info(f"    ✅ Dropped index '{idx_name}'")
-            else:
-                logger.info(f"    [DRY-RUN] Would drop index '{idx_name}'")
-        else:
-            logger.info(f"    ✅ Index '{idx_name}' already gone — skipping")
+    # ── Step 5: Log preservation of legacy columns ──────────────────
+    logger.info("\n  Step 5: Legacy columns preserved for auth backward compat...")
+    preserved = ['username', 'password', 'employee_name', 'password_change_required', 'reset_token', 'reset_token_expiry']
+    for col in preserved:
+        exists = _col_exists(cursor, 'users', col)
+        status = "✅" if exists else "⚠️  MISSING"
+        logger.info(f"    {status} users.{col}")
 
 
 # ─── Phase 2: Onboarding Tables (from SQL file) ────────────────────────
@@ -401,25 +380,24 @@ def verify_migration(cursor):
 
     all_ok = True
 
-    # Verify users table columns
-    logger.info("\n  📋 Users table columns:")
-    expected_cols = ['id', 'email', 'password_hash', 'role', 'employee_id', 'is_active', 'created_at']
-    for col in expected_cols:
+    # Verify users table columns — new + legacy
+    logger.info("\n  📋 Users table new columns:")
+    new_cols = ['id', 'email', 'password_hash', 'role', 'employee_id', 'is_active', 'created_at']
+    for col in new_cols:
         exists = _col_exists(cursor, 'users', col)
         status = "✅" if exists else "❌"
         logger.info(f"    {status} users.{col}")
         if not exists:
             all_ok = False
 
-    # Legacy columns should NOT exist
-    logger.info("\n  📋 Legacy columns (should be absent):")
-    for col in LEGACY_COLUMNS:
+    logger.info("\n  📋 Legacy columns (preserved for auth compat):")
+    legacy = ['username', 'password', 'employee_name', 'password_change_required', 'reset_token', 'reset_token_expiry']
+    for col in legacy:
         exists = _col_exists(cursor, 'users', col)
-        if exists:
-            logger.warning(f"    ⚠️  Legacy column 'users.{col}' still exists")
+        status = "✅" if exists else "❌"
+        logger.info(f"    {status} users.{col}")
+        if not exists:
             all_ok = False
-        else:
-            logger.info(f"    ✅ users.{col} — properly removed")
 
     # Verify role is ENUM
     role_type = _col_type(cursor, 'users', 'role')

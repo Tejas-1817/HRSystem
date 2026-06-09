@@ -83,6 +83,7 @@ def create_app():
     from app.api.routes.profile_routes import profile_bp
     from app.api.routes.announcement_routes import announcement_bp
     from app.api.routes.department_routes import department_bp
+    from app.onboarding import onboarding_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(employee_bp, url_prefix='/employees')
@@ -102,6 +103,7 @@ def create_app():
     app.register_blueprint(device_bp, url_prefix='/devices')
     app.register_blueprint(profile_bp)  # /profile/<employee_name> — team member profile pages
     app.register_blueprint(announcement_bp, url_prefix='/announcements')
+    app.register_blueprint(onboarding_bp, url_prefix='/onboarding')
 
     @app.after_request
     def add_security_headers(response):
