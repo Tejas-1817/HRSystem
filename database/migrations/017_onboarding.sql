@@ -289,7 +289,7 @@ CREATE TABLE IF NOT EXISTS onboarding_declaration (
     INDEX idx_od_joinee (joinee_id),
     INDEX idx_od_status (status),
     INDEX idx_od_submitted (submitted_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 2c. onboarding_references — Professional references (min 3, max 6)
