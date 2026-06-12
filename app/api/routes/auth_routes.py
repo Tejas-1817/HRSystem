@@ -7,7 +7,7 @@ import hashlib
 from datetime import datetime, timedelta
 from app.config import Config
 from app.models.database import get_connection, execute_query, execute_single, Transaction
-from app.api.middleware.auth import token_required, role_required
+from app.api.middleware.auth import token_required, role_required, onboarding_required
 from app.utils.helpers import generate_unique_username, cascade_rename_employee, log_audit_event
 from app.services.leave_service import allocate_default_leaves
 from app.services.employee_service import create_employee_record, update_employee_role
@@ -81,7 +81,7 @@ def login():
 
         # Dual-read: query by both new email column and legacy username column
         query = """
-            SELECT u.*, e.name as employee_name
+            SELECT u.*, COALESCE(e.name, u.employee_name) as employee_name
             FROM users u
             LEFT JOIN employee e ON u.employee_id = e.id
             WHERE (u.email = %s OR u.username = %s)
@@ -102,33 +102,59 @@ def login():
         jwt_username = user.get("email") or user.get("username") or ""
         jwt_employee_name = user.get("employee_name") or ""
 
-        token = jwt.encode({
+        # ── Onboarding-specific enrichment ────────────────────────────────
+        is_onboarding = (user.get("role") == "onboarding_candidate")
+        onboarding_jwt_claims = {}
+        onboarding_response = {"is_onboarding": False}
+
+        if is_onboarding:
+            from app.services.onboarding_service import get_joinee_by_user_id
+            joinee = get_joinee_by_user_id(user["id"])
+            if joinee:
+                onboarding_jwt_claims = {
+                    "joinee_id": joinee["id"],
+                    "onboarding_status": joinee["onboarding_status"],
+                }
+                onboarding_response = {
+                    "is_onboarding": True,
+                    "joinee_id": joinee["id"],
+                    "onboarding_status": joinee["onboarding_status"],
+                    "temp_password_changed": bool(joinee["temp_password_changed"]),
+                }
+        # ─────────────────────────────────────────────────────────────────
+
+        jwt_payload = {
             "user_id": user["id"],
             "username": jwt_username,
             "role": user["role"],
             "employee_name": jwt_employee_name,
             "password_change_required": bool(user.get("password_change_required", False)),
-            "exp": datetime.utcnow() + timedelta(hours=8)
-        }, Config.JWT_SECRET, algorithm="HS256")
+            "exp": datetime.utcnow() + timedelta(hours=8),
+            **onboarding_jwt_claims,
+        }
+        token = jwt.encode(jwt_payload, Config.JWT_SECRET, algorithm="HS256")
 
         if isinstance(token, bytes): token = token.decode("utf-8")
 
         # Resolve clean display names for the response
         clean_name = get_clean_name(jwt_employee_name) if jwt_employee_name else jwt_username
 
+        response_user = {
+            "id": user["id"],
+            "username": jwt_username,
+            "role": user["role"],
+            "employee_name": jwt_employee_name,
+            "full_name": clean_name,
+            "display_name": get_display_name(clean_name, user["role"]),
+            "password_change_required": user.get("password_change_required", False),
+            **onboarding_response,
+        }
+
         return jsonify({
             "success": True,
             "message": "Login successful",
             "token": token,
-            "user": {
-                "id": user["id"],
-                "username": jwt_username,
-                "role": user["role"],
-                "employee_name": jwt_employee_name,
-                "full_name": clean_name,
-                "display_name": get_display_name(clean_name, user["role"]),
-                "password_change_required": user.get("password_change_required", False)
-            }
+            "user": response_user,
         }), 200
     except mysql.connector.Error as db_err:
         logger.error(f"Database error during login: {db_err}")
@@ -158,18 +184,37 @@ def change_password(current_user):
             return jsonify({"success": False, "error": "New password cannot be the same as your current password"}), 400
 
         hashed_password = generate_password_hash(new_password)
-        execute_query("UPDATE users SET password=%s, password_change_required=FALSE WHERE id=%s", (hashed_password, current_user["user_id"]), commit=True)
+
+        # Atomic transaction: update password + mark temp password changed for onboarding
+        with Transaction() as cursor:
+            cursor.execute(
+                "UPDATE users SET password=%s, password_change_required=FALSE WHERE id=%s",
+                (hashed_password, current_user["user_id"])
+            )
+
+            # Mark temp_password_changed for onboarding candidates
+            if current_user["role"] == "onboarding_candidate":
+                from app.services.onboarding_service import mark_temp_password_changed
+                mark_temp_password_changed(current_user["user_id"], cursor=cursor)
 
         # 🔥 Audit Logging
         log_audit_event(current_user["user_id"], "password_change", "User updated their password successfully.")
 
-        new_token = jwt.encode({
+        # Build refreshed JWT with onboarding claims preserved
+        new_jwt_payload = {
             "user_id": current_user["user_id"],
             "username": current_user["username"],
             "role": current_user["role"],
             "employee_name": current_user["employee_name"],
-            "password_change_required": False
-        }, Config.JWT_SECRET, algorithm="HS256")
+            "password_change_required": False,
+        }
+        # Carry forward onboarding claims if present
+        if current_user.get("joinee_id"):
+            new_jwt_payload["joinee_id"] = current_user["joinee_id"]
+        if current_user.get("onboarding_status"):
+            new_jwt_payload["onboarding_status"] = current_user["onboarding_status"]
+
+        new_token = jwt.encode(new_jwt_payload, Config.JWT_SECRET, algorithm="HS256")
 
         return jsonify({"success": True, "message": "Password updated", "token": new_token}), 200
     except Exception as e:
@@ -452,3 +497,36 @@ def logout(current_user):
         logger.error(f"Logout error: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ONBOARDING PROFILE ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════
+
+@auth_bp.route("/onboarding-profile", methods=["GET"])
+@onboarding_required
+def get_onboarding_profile(current_user):
+    """GET /auth/onboarding-profile
+
+    Returns the full onboarding profile for the authenticated onboarding
+    candidate.  Initialises the onboarding dashboard with joinee details,
+    declaration status, and uploaded documents.
+
+    Authorization: role == onboarding_candidate (enforced by @onboarding_required).
+    """
+    try:
+        from app.services.onboarding_service import get_onboarding_profile as fetch_profile
+
+        profile = fetch_profile(current_user["user_id"])
+
+        if not profile:
+            return jsonify({
+                "success": False,
+                "message": "Onboarding profile not found.",
+                "error_code": "ONBOARDING_NOT_FOUND"
+            }), 404
+
+        return jsonify({"success": True, **profile}), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching onboarding profile: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Internal server error"}), 500
