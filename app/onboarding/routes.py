@@ -8,6 +8,7 @@ from app.models.database import execute_query, execute_single, Transaction
 from app.api.middleware.auth import token_required, role_required, onboarding_required
 from app.onboarding import onboarding_bp
 from app.services import declaration_service
+from app.services import document_service
 
 logger = logging.getLogger(__name__)
 
@@ -605,3 +606,376 @@ def review_declaration(current_user, joinee_id):
         logger.error(f"Error reviewing declaration: {str(e)}", exc_info=True)
         return jsonify({"success": False, "message": "Internal server error"}), 500
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DOCUMENT MANAGEMENT APIs
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# API — POST /onboarding/documents/upload
+# ─────────────────────────────────────────────────────────────────────────
+@onboarding_bp.route("/documents/upload", methods=["POST"])
+@onboarding_required
+def upload_document(current_user):
+    """
+    Upload an onboarding document.
+
+    - Role: onboarding_candidate only (enforced by @onboarding_required).
+    - joinee_id is derived from JWT — never from the request.
+    - Blocks uploads if declaration is already APPROVED.
+    - Validates file type (jpeg, png, webp, pdf) and size (≤ 10 MB).
+    - Saves to uploads/onboarding/<joinee_id>/.
+    - Creates audit log entry.
+
+    Request: multipart/form-data with fields: file, document_type, document_label
+    """
+    try:
+        joinee_id = current_user.get("joinee_id")
+        if not joinee_id:
+            return jsonify({
+                "success": False,
+                "message": "Joinee identity could not be resolved from token."
+            }), 403
+
+        # ── Validate form fields ──────────────────────────────────────
+        document_type = (request.form.get("document_type") or "").strip().upper()
+        document_label = (request.form.get("document_label") or "").strip()
+
+        if not document_type:
+            return jsonify({
+                "success": False,
+                "message": "document_type is required."
+            }), 400
+
+        if document_type not in document_service.ALLOWED_DOCUMENT_TYPES:
+            return jsonify({
+                "success": False,
+                "message": (
+                    f"Invalid document_type '{document_type}'. "
+                    f"Allowed: {', '.join(sorted(document_service.ALLOWED_DOCUMENT_TYPES))}"
+                )
+            }), 400
+
+        if not document_label:
+            return jsonify({
+                "success": False,
+                "message": "document_label is required."
+            }), 400
+
+        if len(document_label) > document_service.MAX_LABEL_LENGTH:
+            return jsonify({
+                "success": False,
+                "message": f"document_label must not exceed {document_service.MAX_LABEL_LENGTH} characters."
+            }), 400
+
+        # ── Validate file presence ────────────────────────────────────
+        file = request.files.get("file")
+        if not file or file.filename == "":
+            return jsonify({
+                "success": False,
+                "message": "No file provided. 'file' field is required."
+            }), 400
+
+        # ── Check declaration status (block if APPROVED) ──────────────
+        existing_decl = declaration_service.get_declaration_by_joinee(joinee_id)
+        if existing_decl and existing_decl["status"] == "APPROVED":
+            return jsonify({
+                "success": False,
+                "message": "Documents cannot be added after onboarding approval."
+            }), 403
+
+        # ── Validate file (type, MIME, size) ──────────────────────────
+        try:
+            document_service.validate_upload_file(file)
+        except ValueError as ve:
+            return jsonify({"success": False, "message": str(ve)}), 400
+
+        # ── Save file to disk ─────────────────────────────────────────
+        original_filename = file.filename
+        stored_filename, file_path, file_size, mime_type = (
+            document_service.save_onboarding_document(
+                file, joinee_id, document_type
+            )
+        )
+
+        # ── Transactional DB insert + audit log ───────────────────────
+        with Transaction() as cursor:
+            doc_id = document_service.insert_document_record(
+                joinee_id=joinee_id,
+                document_type=document_type,
+                document_label=document_label,
+                file_original_name=original_filename,
+                file_path=file_path,
+                file_size=file_size,
+                mime_type=mime_type,
+                cursor=cursor,
+            )
+
+            document_service.log_document_audit(
+                joinee_id=joinee_id,
+                action="DOCUMENT_UPLOADED",
+                new_value=document_type,
+                performed_by=current_user["user_id"],
+                notes=f"Uploaded '{document_label}' ({original_filename})",
+                cursor=cursor,
+            )
+
+        return jsonify({
+            "success": True,
+            "message": "Document uploaded successfully",
+            "document_id": doc_id,
+            "document_type": document_type,
+            "document_label": document_label,
+            "verification_status": "PENDING",
+        }), 201
+
+    except mysql.connector.Error as e:
+        logger.error(f"Database error uploading document: {e}", exc_info=True)
+        return jsonify({"success": False, "message": "Database error"}), 500
+    except Exception as e:
+        logger.error(f"Error uploading document: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# API — GET /onboarding/documents
+# ─────────────────────────────────────────────────────────────────────────
+@onboarding_bp.route("/documents", methods=["GET"])
+@role_required(["onboarding_candidate", "hr"])
+def list_documents(current_user):
+    """
+    List onboarding documents.
+
+    - onboarding_candidate: returns own documents (joinee_id from JWT).
+    - hr / admin: requires ?joinee_id=<id> query parameter.
+    - Never exposes file_path or internal storage paths.
+    """
+    try:
+        role = current_user.get("role", "")
+
+        if role == "onboarding_candidate":
+            joinee_id = current_user.get("joinee_id")
+            if not joinee_id:
+                return jsonify({
+                    "success": False,
+                    "message": "Joinee identity could not be resolved from token."
+                }), 403
+        else:
+            # hr or admin
+            joinee_id = request.args.get("joinee_id", type=int)
+            if not joinee_id:
+                return jsonify({
+                    "success": False,
+                    "message": "Query parameter 'joinee_id' is required for HR/admin access."
+                }), 400
+
+        documents = document_service.get_documents_by_joinee(joinee_id)
+
+        # Serialize dates for JSON response
+        serialized = []
+        for doc in documents:
+            serialized.append(document_service.serialize_document(doc))
+
+        return jsonify({
+            "success": True,
+            "count": len(serialized),
+            "documents": serialized,
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error listing documents: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# API — PUT /onboarding/documents/<document_id>/verify
+# ─────────────────────────────────────────────────────────────────────────
+@onboarding_bp.route("/documents/<int:document_id>/verify", methods=["PUT"])
+@role_required(["hr"])
+def verify_document(current_user, document_id):
+    """
+    HR verifies (approves or rejects) an onboarding document.
+
+    Request body:
+        {
+            "verification_status": "APPROVED" | "REJECTED",
+            "rejection_reason": "Required when status is REJECTED"
+        }
+
+    After APPROVED:
+        - Checks if ALL documents + declaration are APPROVED.
+        - If yes, auto-sets onboarding_joinee.onboarding_status = VERIFIED.
+    """
+    try:
+        data = request.get_json() or {}
+        new_status = (data.get("verification_status") or "").strip().upper()
+        rejection_reason = (data.get("rejection_reason") or "").strip()
+
+        # ── Validate status ───────────────────────────────────────────
+        allowed_statuses = ("APPROVED", "REJECTED")
+        if new_status not in allowed_statuses:
+            return jsonify({
+                "success": False,
+                "message": (
+                    f"Invalid verification_status '{new_status}'. "
+                    f"Allowed: {', '.join(allowed_statuses)}"
+                )
+            }), 400
+
+        if new_status == "REJECTED" and not rejection_reason:
+            return jsonify({
+                "success": False,
+                "message": "rejection_reason is required when status is REJECTED."
+            }), 400
+
+        # ── Fetch document ────────────────────────────────────────────
+        document = document_service.get_document_by_id(document_id)
+        if not document:
+            return jsonify({
+                "success": False,
+                "message": "Document not found."
+            }), 404
+
+        joinee_id = document["joinee_id"]
+        hr_user_id = current_user["user_id"]
+
+        # ── Transactional update ──────────────────────────────────────
+        with Transaction() as cursor:
+            document_service.update_verification(
+                document_id=document_id,
+                status=new_status,
+                rejection_reason=rejection_reason if new_status == "REJECTED" else None,
+                verified_by=hr_user_id,
+                cursor=cursor,
+            )
+
+            # Auto-verify joinee if all documents + declaration approved
+            auto_verified = False
+            if new_status == "APPROVED":
+                auto_verified = document_service.check_and_auto_verify_joinee(
+                    joinee_id, cursor
+                )
+
+            # Audit log
+            document_service.log_document_audit(
+                joinee_id=joinee_id,
+                action="DOCUMENT_VERIFIED",
+                new_value=new_status,
+                performed_by=hr_user_id,
+                notes=(
+                    rejection_reason
+                    if new_status == "REJECTED"
+                    else f"Document {document['document_type']} approved by HR"
+                ),
+                cursor=cursor,
+            )
+
+            # If auto-verified, add a separate audit entry
+            if auto_verified:
+                document_service.log_document_audit(
+                    joinee_id=joinee_id,
+                    action="STATUS_CHANGED",
+                    new_value="VERIFIED",
+                    performed_by=hr_user_id,
+                    notes="Auto-verified: all documents and declaration approved",
+                    cursor=cursor,
+                )
+
+        # ── Fetch updated document for response ──────────────────────
+        updated_doc = document_service.get_document_by_id(document_id)
+        response_doc = document_service.serialize_document(updated_doc) if updated_doc else {}
+
+        return jsonify({
+            "success": True,
+            "message": f"Document {new_status.lower()} successfully.",
+            "document": response_doc,
+            "auto_verified": auto_verified if new_status == "APPROVED" else False,
+        }), 200
+
+    except mysql.connector.Error as e:
+        logger.error(f"Database error verifying document: {e}", exc_info=True)
+        return jsonify({"success": False, "message": "Database error"}), 500
+    except Exception as e:
+        logger.error(f"Error verifying document: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# API — DELETE /onboarding/documents/<document_id>
+# ─────────────────────────────────────────────────────────────────────────
+@onboarding_bp.route("/documents/<int:document_id>", methods=["DELETE"])
+@role_required(["onboarding_candidate", "hr"])
+def delete_document(current_user, document_id):
+    """
+    Delete an onboarding document.
+
+    - onboarding_candidate: may delete own documents only, and only if
+      the document is NOT already APPROVED.
+    - hr / admin: may delete any onboarding document.
+
+    Workflow:
+      1. Verify permissions
+      2. Delete physical file from local storage
+      3. Delete database record
+      4. Create audit log
+    """
+    try:
+        # ── Fetch document ────────────────────────────────────────────
+        document = document_service.get_document_by_id(document_id)
+        if not document:
+            return jsonify({
+                "success": False,
+                "message": "Document not found."
+            }), 404
+
+        joinee_id = document["joinee_id"]
+        role = current_user.get("role", "")
+
+        # ── RBAC checks ───────────────────────────────────────────────
+        if role == "onboarding_candidate":
+            # Must be own document
+            user_joinee_id = current_user.get("joinee_id")
+            if joinee_id != user_joinee_id:
+                return jsonify({
+                    "success": False,
+                    "message": "Access denied. You can only delete your own documents."
+                }), 403
+
+            # Cannot delete already-approved documents
+            if document["verification_status"] == "APPROVED":
+                return jsonify({
+                    "success": False,
+                    "message": "Cannot delete an approved document. Contact HR for assistance."
+                }), 403
+
+        # ── Delete physical file ──────────────────────────────────────
+        document_service.delete_document_file(document.get("file_path"))
+
+        # ── Transactional DB delete + audit log ───────────────────────
+        with Transaction() as cursor:
+            document_service.delete_document_record(document_id, cursor)
+
+            document_service.log_document_audit(
+                joinee_id=joinee_id,
+                action="DOCUMENT_DELETED",
+                new_value=document["document_type"],
+                performed_by=current_user["user_id"],
+                notes=(
+                    f"Document '{document['document_label']}' deleted "
+                    f"by {current_user.get('username', 'user')}"
+                ),
+                cursor=cursor,
+            )
+
+        return jsonify({
+            "success": True,
+            "message": "Document removed successfully."
+        }), 200
+
+    except mysql.connector.Error as e:
+        logger.error(f"Database error deleting document: {e}", exc_info=True)
+        return jsonify({"success": False, "message": "Database error"}), 500
+    except Exception as e:
+        logger.error(f"Error deleting document: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
