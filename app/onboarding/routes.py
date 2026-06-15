@@ -10,6 +10,7 @@ from app.onboarding import onboarding_bp
 from app.services import declaration_service
 from app.services import document_service
 from app.services import dashboard_service
+from app.services import migration_service
 from app.utils.json_util import safe_jsonify
 
 logger = logging.getLogger(__name__)
@@ -1018,4 +1019,51 @@ def get_joinee_summary(current_user, joinee_id):
         return safe_jsonify(summary, 200)
     except Exception as e:
         logger.error(f"Error fetching joinee summary for {joinee_id}: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGIN MIGRATION & HR PREFILL APIs
+# ═══════════════════════════════════════════════════════════════════════════
+
+@onboarding_bp.route("/joinees/<int:joinee_id>/migrate-login", methods=["PUT"])
+@role_required(["hr", "admin"])
+def migrate_login(current_user, joinee_id):
+    """
+    API 1: Perform the final onboarding login migration.
+    """
+    try:
+        data = request.get_json() or {}
+        login_email = data.get("login_email")
+        company_email = data.get("company_email")
+        
+        if not login_email:
+            return jsonify({"success": False, "message": "login_email is required"}), 400
+            
+        result = migration_service.migrate_login_email(
+            joinee_id, login_email, company_email, current_user.get("user_id")
+        )
+        return jsonify(result["response"]), result["status"]
+    except Exception as e:
+        logger.error(f"Error migrating login for joinee {joinee_id}: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+@onboarding_bp.route("/joinees/<int:joinee_id>/prefill", methods=["GET"])
+@role_required(["hr", "admin"])
+def get_prefill(current_user, joinee_id):
+    """
+    API 2: Automatically retrieve verified onboarding information for HR prefill.
+    """
+    try:
+        joinee = migration_service.get_prefill_data(joinee_id)
+        if not joinee:
+            return jsonify({"success": False, "message": "Onboarding joinee not found."}), 404
+            
+        response = dict(joinee)
+        if response.get("onboarding_status") != "VERIFIED":
+            response["warning"] = "Joinee is not yet fully verified."
+            
+        return safe_jsonify(response, 200)
+    except Exception as e:
+        logger.error(f"Error fetching prefill data for joinee {joinee_id}: {str(e)}", exc_info=True)
         return jsonify({"success": False, "message": "Internal server error"}), 500
