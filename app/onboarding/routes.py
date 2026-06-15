@@ -987,7 +987,7 @@ def delete_document(current_user, document_id):
 # ═══════════════════════════════════════════════════════════════════════════
 
 @onboarding_bp.route("/stats", methods=["GET"])
-@role_required(["hr_admin"])
+@role_required(["hr"])
 def get_onboarding_stats(current_user):
     """
     API 1: Get onboarding statistics for the HR dashboard.
@@ -1001,7 +1001,7 @@ def get_onboarding_stats(current_user):
 
 
 @onboarding_bp.route("/joinees/<int:joinee_id>/summary", methods=["GET"])
-@role_required(["hr_admin"])
+@role_required(["hr"])
 def get_joinee_summary(current_user, joinee_id):
     """
     API 2: Provide a complete onboarding review summary for a single joinee.
