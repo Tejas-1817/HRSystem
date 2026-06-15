@@ -209,14 +209,15 @@ def get_joinee(current_user,joinee_id):
             else:
                 return jsonify({"success": False, "error": "Access denied"}), 403
 
-        # Get declaration status
-        declaration = execute_single("""
-            SELECT status, submitted_at, hr_notes
-            FROM onboarding_declaration
-            WHERE joinee_id = %s
-            ORDER BY id DESC
-            LIMIT 1
-        """, (joinee_id,))
+        # Get full declaration response using the service
+        full_declaration = declaration_service.build_declaration_response(joinee_id)
+        
+        # Ensure declaration object exists even if empty, to prevent frontend undefined errors
+        if not full_declaration:
+            full_declaration = {
+                "status": None,
+                "submitted_at": None,
+            }
 
         # Get documents (without file_path for security)
         documents = execute_query("""
@@ -229,10 +230,7 @@ def get_joinee(current_user,joinee_id):
         return safe_jsonify({
             "success": True,
             "joinee": joinee,
-            "declaration": {
-                "status": declaration["status"] if declaration else None,
-                "submitted_at": declaration["submitted_at"] if declaration else None,
-            },
+            "declaration": full_declaration,
             "documents": documents,
         }, 200)
 
