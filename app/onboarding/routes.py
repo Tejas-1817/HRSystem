@@ -9,6 +9,7 @@ from app.api.middleware.auth import token_required, role_required, onboarding_re
 from app.onboarding import onboarding_bp
 from app.services import declaration_service
 from app.services import document_service
+from app.services import dashboard_service
 from app.utils.json_util import safe_jsonify
 
 logger = logging.getLogger(__name__)
@@ -979,4 +980,42 @@ def delete_document(current_user, document_id):
         return jsonify({"success": False, "message": "Database error"}), 500
     except Exception as e:
         logger.error(f"Error deleting document: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HR DASHBOARD & VERIFICATION SUMMARY APIs
+# ═══════════════════════════════════════════════════════════════════════════
+
+@onboarding_bp.route("/stats", methods=["GET"])
+@role_required(["hr_admin"])
+def get_onboarding_stats(current_user):
+    """
+    API 1: Get onboarding statistics for the HR dashboard.
+    """
+    try:
+        stats = dashboard_service.get_dashboard_stats()
+        return safe_jsonify(stats, 200)
+    except Exception as e:
+        logger.error(f"Error fetching onboarding stats: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+@onboarding_bp.route("/joinees/<int:joinee_id>/summary", methods=["GET"])
+@role_required(["hr_admin"])
+def get_joinee_summary(current_user, joinee_id):
+    """
+    API 2: Provide a complete onboarding review summary for a single joinee.
+    """
+    try:
+        summary = dashboard_service.get_joinee_summary(joinee_id)
+        if not summary:
+            return jsonify({
+                "success": False,
+                "message": "Onboarding joinee not found.",
+                "error_code": "JOINEE_NOT_FOUND"
+            }), 404
+            
+        return safe_jsonify(summary, 200)
+    except Exception as e:
+        logger.error(f"Error fetching joinee summary for {joinee_id}: {str(e)}", exc_info=True)
         return jsonify({"success": False, "message": "Internal server error"}), 500
