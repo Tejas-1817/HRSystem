@@ -148,15 +148,24 @@ def create_joinee(current_user):
 def list_joinees(current_user):
     try:
         status_filter = request.args.get("status")
+        include_deleted = request.args.get("include_deleted", "false").lower() == "true"
         page = max(1, int(request.args.get("page", 1)))
         per_page = min(100, max(1, int(request.args.get("per_page", 20))))
         offset = (page - 1) * per_page
 
-        where_clause = ""
+        conditions = []
         params = []
+        
+        if not include_deleted:
+            conditions.append("oj.deleted_at IS NULL")
+
         if status_filter:
-            where_clause = "WHERE oj.onboarding_status = %s"
+            conditions.append("oj.onboarding_status = %s")
             params.append(status_filter.upper())
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
 
         count_query = f"SELECT COUNT(*) as total FROM onboarding_joinee oj {where_clause}"
         count_result = execute_single(count_query, tuple(params))
@@ -166,7 +175,7 @@ def list_joinees(current_user):
             SELECT oj.id, oj.person_id, oj.full_name, oj.phone,
                    oj.personal_email, oj.company_email, oj.active_login_email,
                    oj.onboarding_status, oj.joining_date, oj.assigned_role,
-                   oj.assigned_department, oj.created_at
+                   oj.assigned_department, oj.created_at, oj.deleted_at
             FROM onboarding_joinee oj
             {where_clause}
             ORDER BY oj.created_at DESC
@@ -237,6 +246,75 @@ def get_joinee(current_user,joinee_id):
     except Exception as e:
         logger.error(f"Error fetching joinee {joinee_id}: {str(e)}", exc_info=True)
         return jsonify({"success": False, "error": "Internal server error"}), 500
+
+
+@onboarding_bp.route("/joinees/<int:joinee_id>", methods=["DELETE"])
+@role_required(["hr"])
+def delete_joinee(current_user, joinee_id):
+    try:
+        hr_user_id = current_user.get("user_id")
+
+        # 1. Fetch the onboarding_joinee record
+        joinee = execute_single(
+            "SELECT * FROM onboarding_joinee WHERE id = %s",
+            (joinee_id,)
+        )
+        if not joinee:
+            return jsonify({"success": False, "message": "Joinee not found"}), 404
+
+        # 2. SAFETY CHECK - block deletion if VERIFIED
+        if joinee.get("onboarding_status") == "VERIFIED":
+            return jsonify({
+                "success": False,
+                "message": "Cannot delete a verified joinee. Migrate them to a Team Member instead."
+            }), 400
+
+        user_id_linked = joinee.get("user_id")
+        old_status = joinee.get("onboarding_status")
+
+        # 4. Perform a SOFT DELETE in a transaction
+        with Transaction() as cursor:
+            # a. Disable user login immediately
+            if user_id_linked:
+                cursor.execute(
+                    "UPDATE users SET is_active = 0 WHERE id = %s",
+                    (user_id_linked,)
+                )
+
+            # b. Set deleted_at and deleted_by on the joinee record
+            cursor.execute(
+                """
+                UPDATE onboarding_joinee
+                SET deleted_at = CURRENT_TIMESTAMP, deleted_by = %s
+                WHERE id = %s
+                """,
+                (hr_user_id, joinee_id)
+            )
+
+            # 5. Insert into audit log
+            cursor.execute(
+                """
+                INSERT INTO onboarding_audit_log
+                    (joinee_id, action, old_value, new_value, performed_by, notes)
+                VALUES (%s, 'JOINEE_DELETED', %s, 'DELETED', %s, %s)
+                """,
+                (
+                    joinee_id,
+                    old_status,
+                    hr_user_id,
+                    "Soft deleted by HR. Login disabled."
+                )
+            )
+
+        return jsonify({
+            "success": True,
+            "message": "Joinee deleted successfully.",
+            "joinee_id": joinee_id
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting joinee {joinee_id}: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
 
 
 # ═══════════════════════════════════════════════════════════════════════════
