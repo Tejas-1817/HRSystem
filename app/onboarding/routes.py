@@ -86,9 +86,9 @@ def create_joinee(current_user):
         with Transaction() as cursor:
             # Insert into users table
             cursor.execute("""
-                INSERT INTO users (email, password_hash, role, is_active, username, password)
-                VALUES (%s, %s, 'onboarding_candidate', TRUE, %s, %s)
-            """, (personal_email, hashed_password, personal_email, hashed_password))
+                INSERT INTO users (email, password_hash, role, is_active, username, password, employee_name)
+                VALUES (%s, %s, 'onboarding_candidate', TRUE, %s, %s, %s)
+            """, (personal_email, hashed_password, personal_email, hashed_password, cleaned["full_name"]))
             user_id = cursor.lastrowid
 
             # Insert into onboarding_joinee
