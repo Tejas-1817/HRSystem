@@ -9,6 +9,7 @@ from app.api.middleware.auth import token_required, role_required, onboarding_re
 from app.onboarding import onboarding_bp
 from app.services import declaration_service
 from app.services import document_service
+from app.utils.json_util import safe_jsonify
 
 logger = logging.getLogger(__name__)
 
@@ -172,13 +173,13 @@ def list_joinees(current_user):
         params.extend([per_page, offset])
         rows = execute_query(data_query, tuple(params)) or []
 
-        return jsonify({
+        return safe_jsonify({
             "success": True,
             "total": total,
             "page": page,
             "per_page": per_page,
             "data": rows,
-        }), 200
+        }, 200)
 
     except Exception as e:
         logger.error(f"Error listing joinees: {str(e)}", exc_info=True)
@@ -223,7 +224,7 @@ def get_joinee(current_user,joinee_id):
             ORDER BY uploaded_at DESC
         """, (joinee_id,)) or []
 
-        return jsonify({
+        return safe_jsonify({
             "success": True,
             "joinee": joinee,
             "declaration": {
@@ -231,7 +232,7 @@ def get_joinee(current_user,joinee_id):
                 "submitted_at": declaration["submitted_at"] if declaration else None,
             },
             "documents": documents,
-        }), 200
+        }, 200)
 
     except Exception as e:
         logger.error(f"Error fetching joinee {joinee_id}: {str(e)}", exc_info=True)
