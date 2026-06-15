@@ -156,7 +156,11 @@ def create_team_member_record(data, role, cursor, with_user=True, created_by=Non
     
     # Extract dates/fields (support multiple naming conventions for compatibility)
     dob = data.get("date_of_birth") or data.get("dob") or data.get("birthDate")
+    dob = dob if dob else None
+    
     doj = data.get("date_of_joining") or data.get("doj") or data.get("joiningDate")
+    doj = doj if doj else None
+    
     email = data.get("email") or data.get("username")
     
     if not email:
@@ -167,10 +171,25 @@ def create_team_member_record(data, role, cursor, with_user=True, created_by=Non
     
     # Extract new HR fields
     designation = data.get("designation")
+    designation = designation if designation else None
+    
     department = data.get("department")
+    department = department if department else None
+    
     gender = data.get("gender")
+    gender = gender if gender else None
+    
     address = data.get("address")
+    address = address if address else None
+    
     employment_type = data.get("employment_type")
+    employment_type = employment_type if employment_type else None
+    
+    salary = data.get("salary")
+    salary = salary if salary not in ["", None] else None
+    
+    phone = data.get("phone")
+    phone = phone if phone else None
     
     # Auto-generate team member code
     team_member_code = generate_team_member_code(cursor)
@@ -182,12 +201,12 @@ def create_team_member_record(data, role, cursor, with_user=True, created_by=Non
          designation, department, gender, address, employment_type, team_member_code, created_by)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
-        team_member_id, email, data.get("phone"),
-        data.get("salary"), dob, doj, data.get("photo_path"), 
+        team_member_id, email, phone,
+        salary, dob, doj, data.get("photo_path"), 
         data.get("pdf_path"), data.get("docx_path"),
-        data.get("designation"), data.get("department"),
-        data.get("gender"), data.get("address"),
-        data.get("employment_type"),team_member_code,created_by
+        designation, department,
+        gender, address,
+        employment_type, team_member_code, created_by
     ))
     
     # 2. Allocate leaves

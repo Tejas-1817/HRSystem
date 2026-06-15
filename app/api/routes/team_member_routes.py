@@ -315,6 +315,12 @@ def create_new_team_member(current_user):
             "data": team_member
         }), 201
         
+    except mysql.connector.Error as db_err:
+        logger.error(f"Database error creating team member: {db_err}")
+        return jsonify({
+            "success": False, 
+            "error": "A user with this email or identity already exists in the system."
+        }), 400
     except Exception as e:
         logger.error(f"Error creating team member: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500
