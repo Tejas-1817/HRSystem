@@ -1,6 +1,6 @@
 -- Table: devices
 CREATE TABLE IF NOT EXISTS devices (
-    id             INT AUTO_INCREMENT PRIMARY KEY,
+    id               VARCHAR(50)PRIMARY KEY,
     device_type    VARCHAR(50) NOT NULL DEFAULT 'Laptop',
     brand          VARCHAR(100) NOT NULL,
     model          VARCHAR(100) NOT NULL,
