@@ -103,10 +103,21 @@ def create_employee_record(data, role, cursor, with_user=True, created_by=None, 
         sanitized_username = email.strip().lower()
         logger.info(f"Generating login account for {sanitized_username}")
         hashed_password = generate_password_hash(DEFAULT_TEMP_PASSWORD)
+        # Fetch the integer ID of the newly created employee to link the user account
+        cursor.execute("SELECT id FROM employee WHERE name = %s", (employee_name,))
+        emp_row = cursor.fetchone()
+        employee_pk = emp_row['id'] if isinstance(emp_row, dict) else emp_row[0]
+
         cursor.execute("""
-            INSERT INTO users (username, password, role, employee_name, password_change_required, is_active)
-            VALUES (%s, %s, %s, %s, TRUE, TRUE)
-        """, (sanitized_username, hashed_password, role, employee_name))
+            INSERT INTO users (
+                username, password, role, employee_name, password_change_required, is_active,
+                email, password_hash, employee_id
+            )
+            VALUES (%s, %s, %s, %s, TRUE, TRUE, %s, %s, %s)
+        """, (
+            sanitized_username, hashed_password, role, employee_name,
+            sanitized_username, hashed_password, employee_pk
+        ))
     
     # Log audit event with modern terminology
     log_audit_event(
