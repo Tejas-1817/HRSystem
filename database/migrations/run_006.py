@@ -64,8 +64,8 @@ def run():
                 executed += 1
             except mysql.connector.Error as e:
                 # Idempotency: already exists/duplicate object.
-                if e.errno in (1060, 1061, 1050, 1826):
-                    # 1826 = duplicate foreign key constraint name
+                if e.errno in (1060, 1061, 1050, 1826, 1005):
+                    # 1826/1005 = duplicate foreign key constraint name
                     print(f"  ⏩ Skipped (already applied): {stmt[:60]}...")
                     executed += 1
                 else:
