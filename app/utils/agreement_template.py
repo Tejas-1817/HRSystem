@@ -20,49 +20,49 @@ Device: {brand} {model}
 Serial Number: {serial_number}
 Device Type: {device_type}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--------------------------------------------------------------------------
 
 1. General Guidelines
 
-   • Users must ensure proper care, handling, and safe usage of the device at all times.
-   • Confidentiality of company data must be maintained without exception.
-   • The device is the property of Altzor Digital Solutions Pvt. Ltd. and must be returned upon request or termination of employment.
-   • The device must be used primarily for official work purposes.
+   - Users must ensure proper care, handling, and safe usage of the device at all times.
+   - Confidentiality of company data must be maintained without exception.
+   - The device is the property of Altzor Digital Solutions Pvt. Ltd. and must be returned upon request or termination of employment.
+   - The device must be used primarily for official work purposes.
 
 2. Security Responsibilities
 
-   • Users are responsible for protecting data stored on the device.
-   • Passwords must be strong and changed periodically (every 90 days).
-   • The device must be locked when unattended.
-   • Any loss, theft, or security incident must be reported immediately.
+   - Users are responsible for protecting data stored on the device.
+   - Passwords must be strong and changed periodically (every 90 days).
+   - The device must be locked when unattended.
+   - Any loss, theft, or security incident must be reported immediately.
 
 3. System Handling & Maintenance
 
-   • The Laptop/MacBook must be kept clean and stored in a safe, dry environment.
-   • Only authorized personnel may install or modify software.
-   • Regular updates and system patches must not be ignored.
+   - The Laptop/MacBook must be kept clean and stored in a safe, dry environment.
+   - Only authorized personnel may install or modify software.
+   - Regular updates and system patches must not be ignored.
 
 4. Restrictions
 
-   • Personal, commercial, or unauthorized use is strictly prohibited.
-   • External storage devices must not be used to store company data.
-   • Accessing unsecured/public Wi-Fi networks is not allowed.
-   • Installation of unauthorized or pirated software is prohibited.
-   • The device must not be shared with unauthorized individuals.
+   - Personal, commercial, or unauthorized use is strictly prohibited.
+   - External storage devices must not be used to store company data.
+   - Accessing unsecured/public Wi-Fi networks is not allowed.
+   - Installation of unauthorized or pirated software is prohibited.
+   - The device must not be shared with unauthorized individuals.
 
 5. Liability & Compliance
 
-   • The user will be held accountable for any damage or loss due to negligence.
-   • In case of theft, a police complaint must be filed and submitted to the company.
-   • Any policy violations may result in disciplinary or legal action.
+   - The user will be held accountable for any damage or loss due to negligence.
+   - In case of theft, a police complaint must be filed and submitted to the company.
+   - Any policy violations may result in disciplinary or legal action.
 
 6. Additional Security Measures
 
-   • The user is responsible for protecting the Laptop/MacBook physically.
-   • Any configuration change or software installation requires prior approval from the authorized manager.
-   • The user is responsible for maintaining all required security protocols.
+   - The user is responsible for protecting the Laptop/MacBook physically.
+   - Any configuration change or software installation requires prior approval from the authorized manager.
+   - The user is responsible for maintaining all required security protocols.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--------------------------------------------------------------------------
 
 DECLARATION
 
