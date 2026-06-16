@@ -2,8 +2,9 @@ from flask import Blueprint, request, jsonify
 from app.api.middleware.auth import token_required, role_required
 from app.services.device_service import (
     list_devices, get_device_by_id, create_device,
-    assign_device, return_device, get_device_history,
-    add_device_image, get_employee_devices, soft_delete_device
+    assign_device, return_device, return_device_enterprise,
+    get_device_history, add_device_image, get_employee_devices,
+    soft_delete_device
 )
 from app.services.device_agreement_service import (
     get_pending_agreement, accept_agreement,
@@ -77,9 +78,40 @@ def allocate_device(current_user, device_id):
 @device_bp.route("/<int:device_id>/return", methods=["POST"])
 @role_required(["hr"])
 def deallocate_device(current_user, device_id):
-    if return_device(device_id):
-        return jsonify({"success": True, "message": "Device returned successfully"}), 200
-    return jsonify({"success": False, "error": "Device not found"}), 404
+    """
+    Return an assigned asset — enterprise-grade workflow.
+
+    Accepts optional JSON body:
+        { "return_reason": "End of employment" }
+
+    Authorization: HR + Admin only (enforced by @role_required).
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        result = return_device_enterprise(
+            device_id=device_id,
+            returned_by=current_user["employee_name"],
+            return_reason=data.get("return_reason"),
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
+        return jsonify({
+            "success": True,
+            "message": "Asset returned successfully.",
+            **result,
+        }), 200
+
+    except LookupError as e:
+        msg = str(e)
+        if msg.startswith("CONFLICT:"):
+            return jsonify({"success": False, "error": msg[len("CONFLICT:"):]}), 409
+        return jsonify({"success": False, "error": msg}), 404
+
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @device_bp.route("/<int:device_id>/upload-image", methods=["POST"])
 @role_required(["hr"])

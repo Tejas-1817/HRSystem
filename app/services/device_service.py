@@ -182,28 +182,183 @@ def assign_device(device_id: int, employee_name: str) -> bool:
     return True
 
 
+def return_device_enterprise(
+    device_id: int,
+    returned_by: str,
+    return_reason: str = None,
+    ip_address: str = None,
+    user_agent: str = None,
+) -> dict:
+    """
+    Enterprise-grade Return Asset workflow.
+
+    Performs all steps inside a single database transaction with automatic
+    rollback on failure. Preserves full assignment history and creates
+    audit + notification records for compliance.
+
+    Parameters
+    ----------
+    device_id : int
+        Primary key of the device to return.
+    returned_by : str
+        employee_name of the HR/Admin performing the return.
+    return_reason : str, optional
+        Reason for the return (e.g. "End of employment", "Device upgrade").
+    ip_address : str, optional
+        IP address of the requester (for audit trail).
+    user_agent : str, optional
+        User-Agent header of the requester (for audit trail).
+
+    Returns
+    -------
+    dict
+        Structured result with device_id, asset_status, returned_by, etc.
+
+    Raises
+    ------
+    LookupError
+        If device does not exist (404) or is not in 'Assigned' status (409).
+    ValueError
+        If required parameters are invalid.
+    """
+    with Transaction() as cursor:
+        # ── Step 1: Validate device exists ──────────────────────────────
+        cursor.execute(
+            "SELECT * FROM devices WHERE id = %s AND is_deleted = FALSE",
+            (device_id,),
+        )
+        device = cursor.fetchone()
+        if not device:
+            raise LookupError("Device not found.")
+
+        device_label = f"{device['brand']} {device['model']} (SN: {device['serial_number']})"
+
+        # ── Step 2: Validate device is currently Assigned ───────────────
+        if device["status"] != "Assigned":
+            if device["status"] == "Available":
+                raise LookupError("CONFLICT:Asset is already available and not assigned to anyone.")
+            raise LookupError(
+                f"CONFLICT:Asset cannot be returned — current status is '{device['status']}'."
+            )
+
+        # ── Step 3: Find the active assignment ──────────────────────────
+        cursor.execute("""
+            SELECT da.*, e.id AS employee_pk
+            FROM device_assignments da
+            LEFT JOIN employee e ON da.employee_name = e.name
+            WHERE da.device_id = %s AND da.returned_date IS NULL
+            ORDER BY da.assigned_date DESC
+            LIMIT 1
+        """, (device_id,))
+        assignment = cursor.fetchone()
+
+        assigned_employee = assignment["employee_name"] if assignment else "Unknown"
+        employee_pk = assignment["employee_pk"] if assignment else None
+
+        # ── Step 4: Archive assignment (never delete) ───────────────────
+        if assignment:
+            cursor.execute("""
+                UPDATE device_assignments
+                SET returned_date  = CURRENT_DATE,
+                    returned_by    = %s,
+                    return_reason  = %s,
+                    acceptance_status = CASE
+                        WHEN acceptance_status = 'pending' THEN 'rejected'
+                        ELSE acceptance_status
+                    END
+                WHERE id = %s
+            """, (returned_by, return_reason, assignment["id"]))
+
+        # ── Step 5: Update device status to Available ───────────────────
+        cursor.execute(
+            "UPDATE devices SET status = 'Available', updated_at = NOW() WHERE id = %s",
+            (device_id,),
+        )
+
+        # ── Step 6: Audit log with request metadata ─────────────────────
+        # Resolve the HR/Admin employee PK for the audit log
+        cursor.execute(
+            "SELECT id FROM employee WHERE name = %s LIMIT 1",
+            (returned_by,),
+        )
+        performer = cursor.fetchone()
+        performer_id = performer["id"] if performer else 0
+
+        reason_text = f" Reason: {return_reason}" if return_reason else ""
+        cursor.execute("""
+            INSERT INTO audit_logs
+                (user_id, event_type, description, ip_address, user_agent)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (
+            performer_id,
+            "ASSET_RETURNED",
+            f"{returned_by} returned device {device_label} "
+            f"from {assigned_employee}.{reason_text}",
+            ip_address,
+            user_agent,
+        ))
+
+        # ── Step 7: Notify the employee ─────────────────────────────────
+        cursor.execute("""
+            INSERT INTO notifications (employee_name, title, message, type)
+            VALUES (%s, %s, %s, 'device_return')
+        """, (
+            assigned_employee,
+            "Device Returned",
+            f"Your {device_label} has been returned by {returned_by}. "
+            f"The device has been removed from your profile.{reason_text}",
+        ))
+
+        # ── Step 8: Notify all HR/Admin users ───────────────────────────
+        cursor.execute("""
+            INSERT INTO notifications (employee_name, title, message, type)
+            SELECT DISTINCT u.employee_name, %s, %s, 'device_return'
+            FROM users u
+            WHERE u.role IN ('hr', 'admin')
+              AND u.employee_name != %s
+        """, (
+            "Asset Return Processed",
+            f"{returned_by} has returned {device_label} "
+            f"(previously assigned to {assigned_employee}).{reason_text}",
+            returned_by,
+        ))
+
+    # ── Step 9: Log stock event (non-critical, outside transaction) ─────
+    _log_stock(
+        device_id, device.get("catalog_id"), "returned", returned_by,
+        old_status="Assigned", new_status="Available",
+        notes=f"Returned from {assigned_employee}. {reason_text}".strip(),
+    )
+
+    logger.info(
+        "ASSET_RETURNED: device_id=%s label=%s from=%s by=%s reason=%s",
+        device_id, device_label, assigned_employee, returned_by, return_reason,
+    )
+
+    return {
+        "device_id": device_id,
+        "device_label": device_label,
+        "asset_status": "AVAILABLE",
+        "available_for_assignment": True,
+        "returned_by": returned_by,
+        "returned_from": assigned_employee,
+        "returned_at": datetime.now().strftime("%Y-%m-%d"),
+        "return_reason": return_reason,
+    }
+
+
 def return_device(device_id: int) -> bool:
-    """Mark device as returned and update status to Available."""
-    device = execute_single("SELECT id, catalog_id FROM devices WHERE id = %s", (device_id,))
+    """
+    Legacy wrapper — kept for backward compatibility.
 
-    execute_query("""
-        UPDATE device_assignments 
-        SET returned_date = CURRENT_DATE,
-            acceptance_status = CASE
-                WHEN acceptance_status = 'pending' THEN 'rejected'
-                ELSE acceptance_status
-            END
-        WHERE device_id = %s AND returned_date IS NULL
-    """, (device_id,), commit=True)
-    
-    execute_query("UPDATE devices SET status = 'Available' WHERE id = %s", (device_id,), commit=True)
-
-    # Log stock event
-    if device:
-        _log_stock(device_id, device.get("catalog_id"), "returned", "system",
-                   old_status="Assigned", new_status="Available", notes="Device returned")
-
-    return True
+    Delegates to the enterprise return workflow with minimal defaults.
+    Returns True on success for callers expecting the old boolean API.
+    """
+    try:
+        return_device_enterprise(device_id, returned_by="system")
+        return True
+    except (LookupError, ValueError):
+        return False
 
 
 def get_device_history(device_id: int) -> dict:
