@@ -116,13 +116,15 @@ def create_device(data: dict) -> int:
 
     device_id = execute_query("""
         INSERT INTO devices (brand, model, serial_number, status, device_type,
-                             catalog_id, purchase_date, warranty_expiry, condition_notes, location)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             catalog_id, purchase_date, warranty_expiry, condition_notes, location,
+                             processor, ram, storage)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         data["brand"], data["model"], data["serial_number"],
         data.get("status", "Available"), data.get("device_type", "Laptop"),
         catalog_id, data.get("purchase_date"), data.get("warranty_expiry"),
         data.get("condition_notes"), data.get("location", "HQ"),
+        data.get("processor"), data.get("ram"), data.get("storage"),
     ), commit=True)
 
     # Log stock event
