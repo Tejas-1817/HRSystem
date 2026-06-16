@@ -115,12 +115,12 @@ def create_device(data: dict) -> int:
             catalog_id = cat["id"]
 
     device_id = execute_query("""
-        INSERT INTO devices (brand, model, serial_number, status, device_type,
+        INSERT INTO devices (brand, model, serial_number, asset_id, status, device_type,
                              catalog_id, purchase_date, warranty_expiry, condition_notes, location,
                              processor, ram, storage)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
-        data["brand"], data["model"], data["serial_number"],
+        data["brand"], data["model"], data["serial_number"], data.get("asset_id"),
         data.get("status", "Available"), data.get("device_type", "Laptop"),
         catalog_id, data.get("purchase_date"), data.get("warranty_expiry"),
         data.get("condition_notes"), data.get("location", "HQ"),
