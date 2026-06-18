@@ -1,0 +1,293 @@
+diff --git a/app/api/routes/device_routes.py b/app/api/routes/device_routes.py
+index 0064923..2e95aba 100644
+--- a/app/api/routes/device_routes.py
++++ b/app/api/routes/device_routes.py
+@@ -39,11 +39,16 @@ def add_device(current_user):
+     required = ["brand", "model", "serial_number"]
+     if not all(k in data for k in required):
+         return jsonify({"success": False, "error": "brand, model, and serial_number are required"}), 400
+-    
++
++    if data.get("ownership_type") == "Rented" and not data.get("vendor_name"):
++        return jsonify({"success": False, "error": "vendor_name is required when ownership_type is 'Rented'"}), 400
++
+     try:
+         data["added_by"] = current_user["employee_name"]
+         device_id = create_device(data)
+         return jsonify({"success": True, "device_id": device_id, "message": "Device created"}), 201
++    except ValueError as ve:
++        return jsonify({"success": False, "error": str(ve)}), 400
+     except Exception as e:
+         return jsonify({"success": False, "error": str(e)}), 500
+ 
+diff --git a/app/services/device_service.py b/app/services/device_service.py
+index 258bd94..f23e22c 100644
+--- a/app/services/device_service.py
++++ b/app/services/device_service.py
+@@ -102,7 +102,8 @@ def get_device_by_id(device_id: int):
+ 
+ 
+ def create_device(data: dict) -> int:
+-    """Add a new device to the system with optional catalog linkage and purchase metadata."""
++    """Add a new device to the system with optional catalog linkage, purchase metadata,
++    and ownership/rental details (Purchased vs Rented + vendor info)."""
+     catalog_id = data.get("catalog_id")
+ 
+     # Auto-link to catalog by brand+model if not explicitly provided
+@@ -114,22 +115,45 @@ def create_device(data: dict) -> int:
+         if cat:
+             catalog_id = cat["id"]
+ 
++    ownership_type = data.get("ownership_type", "Purchased")
++    if ownership_type not in ("Purchased", "Rented"):
++        raise ValueError("ownership_type must be 'Purchased' or 'Rented'")
++
++    # Vendor / rental fields only make sense when the asset is Rented.
++    # Silently drop them for Purchased assets so stale data can't linger.
++    if ownership_type == "Rented":
++        if not data.get("vendor_name"):
++            raise ValueError("vendor_name is required when ownership_type is 'Rented'")
++        vendor_name = data.get("vendor_name")
++        vendor_contact = data.get("vendor_contact")
++        rental_start_date = data.get("rental_start_date")
++        rental_end_date = data.get("rental_end_date")
++        rental_cost = data.get("rental_cost")
++        rental_cost_frequency = data.get("rental_cost_frequency")
++    else:
++        vendor_name = vendor_contact = rental_start_date = None
++        rental_end_date = rental_cost = rental_cost_frequency = None
++
+     device_id = execute_query("""
+         INSERT INTO devices (brand, model, serial_number, asset_id, status, device_type,
+                              catalog_id, purchase_date, warranty_expiry, condition_notes, location,
+-                             processor, ram, storage)
+-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
++                             processor, ram, storage, ownership_type, vendor_name, vendor_contact,
++                             rental_start_date, rental_end_date, rental_cost, rental_cost_frequency)
++        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+     """, (
+         data["brand"], data["model"], data["serial_number"], data.get("asset_id"),
+         data.get("status", "Available"), data.get("device_type", "Laptop"),
+         catalog_id, data.get("purchase_date"), data.get("warranty_expiry"),
+         data.get("condition_notes"), data.get("location", "HQ"),
+         data.get("processor"), data.get("ram"), data.get("storage"),
++        ownership_type, vendor_name, vendor_contact,
++        rental_start_date, rental_end_date, rental_cost, rental_cost_frequency,
+     ), commit=True)
+ 
+     # Log stock event
++    note_suffix = f" ({ownership_type}{' via ' + vendor_name if vendor_name else ''})"
+     _log_stock(device_id, catalog_id, "added", data.get("added_by", "system"),
+-               new_status="Available", notes=f"New device added: {data['brand']} {data['model']}")
++               new_status="Available", notes=f"New device added: {data['brand']} {data['model']}{note_suffix}")
+ 
+     return device_id
+ 
+diff --git a/database/migrations/022_asset_ownership_rental.sql b/database/migrations/022_asset_ownership_rental.sql
+new file mode 100644
+index 0000000..ea306a5
+--- /dev/null
++++ b/database/migrations/022_asset_ownership_rental.sql
+@@ -0,0 +1,131 @@
++-- ============================================================================
++-- Migration 022: Asset Ownership Type & Rental Vendor Details
++-- ============================================================================
++-- Adds ownership_type (Purchased / Rented) to devices, plus vendor and
++-- rental-period fields used when an asset is rented rather than purchased.
++-- Safe: Uses INFORMATION_SCHEMA checks — fully idempotent.
++-- ============================================================================
++
++USE hrms;
++
++-- 1. ownership_type: Purchased (default) or Rented
++SET @col_exists = (
++    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
++    WHERE TABLE_SCHEMA = DATABASE()
++      AND TABLE_NAME = 'devices'
++      AND COLUMN_NAME = 'ownership_type'
++);
++SET @sql = IF(@col_exists = 0,
++    'ALTER TABLE devices ADD COLUMN ownership_type ENUM(''Purchased'', ''Rented'') NOT NULL DEFAULT ''Purchased'' AFTER location',
++    'SELECT ''Column ownership_type already exists'' AS status'
++);
++PREPARE stmt FROM @sql;
++EXECUTE stmt;
++DEALLOCATE PREPARE stmt;
++
++-- 2. vendor_name: rental vendor / leasing company name
++SET @col_exists = (
++    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
++    WHERE TABLE_SCHEMA = DATABASE()
++      AND TABLE_NAME = 'devices'
++      AND COLUMN_NAME = 'vendor_name'
++);
++SET @sql = IF(@col_exists = 0,
++    'ALTER TABLE devices ADD COLUMN vendor_name VARCHAR(150) NULL AFTER ownership_type',
++    'SELECT ''Column vendor_name already exists'' AS status'
++);
++PREPARE stmt FROM @sql;
++EXECUTE stmt;
++DEALLOCATE PREPARE stmt;
++
++-- 3. vendor_contact: phone / email of the vendor point of contact
++SET @col_exists = (
++    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
++    WHERE TABLE_SCHEMA = DATABASE()
++      AND TABLE_NAME = 'devices'
++      AND COLUMN_NAME = 'vendor_contact'
++);
++SET @sql = IF(@col_exists = 0,
++    'ALTER TABLE devices ADD COLUMN vendor_contact VARCHAR(150) NULL AFTER vendor_name',
++    'SELECT ''Column vendor_contact already exists'' AS status'
++);
++PREPARE stmt FROM @sql;
++EXECUTE stmt;
++DEALLOCATE PREPARE stmt;
++
++-- 4. rental_start_date
++SET @col_exists = (
++    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
++    WHERE TABLE_SCHEMA = DATABASE()
++      AND TABLE_NAME = 'devices'
++      AND COLUMN_NAME = 'rental_start_date'
++);
++SET @sql = IF(@col_exists = 0,
++    'ALTER TABLE devices ADD COLUMN rental_start_date DATE NULL AFTER vendor_contact',
++    'SELECT ''Column rental_start_date already exists'' AS status'
++);
++PREPARE stmt FROM @sql;
++EXECUTE stmt;
++DEALLOCATE PREPARE stmt;
++
++-- 5. rental_end_date
++SET @col_exists = (
++    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
++    WHERE TABLE_SCHEMA = DATABASE()
++      AND TABLE_NAME = 'devices'
++      AND COLUMN_NAME = 'rental_end_date'
++);
++SET @sql = IF(@col_exists = 0,
++    'ALTER TABLE devices ADD COLUMN rental_end_date DATE NULL AFTER rental_start_date',
++    'SELECT ''Column rental_end_date already exists'' AS status'
++);
++PREPARE stmt FROM @sql;
++EXECUTE stmt;
++DEALLOCATE PREPARE stmt;
++
++-- 6. rental_cost: periodic rental amount
++SET @col_exists = (
++    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
++    WHERE TABLE_SCHEMA = DATABASE()
++      AND TABLE_NAME = 'devices'
++      AND COLUMN_NAME = 'rental_cost'
++);
++SET @sql = IF(@col_exists = 0,
++    'ALTER TABLE devices ADD COLUMN rental_cost DECIMAL(12,2) NULL AFTER rental_end_date',
++    'SELECT ''Column rental_cost already exists'' AS status'
++);
++PREPARE stmt FROM @sql;
++EXECUTE stmt;
++DEALLOCATE PREPARE stmt;
++
++-- 7. rental_cost_frequency: how often rental_cost is billed
++SET @col_exists = (
++    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
++    WHERE TABLE_SCHEMA = DATABASE()
++      AND TABLE_NAME = 'devices'
++      AND COLUMN_NAME = 'rental_cost_frequency'
++);
++SET @sql = IF(@col_exists = 0,
++    'ALTER TABLE devices ADD COLUMN rental_cost_frequency ENUM(''Monthly'', ''Quarterly'', ''Yearly'', ''One-time'') NULL AFTER rental_cost',
++    'SELECT ''Column rental_cost_frequency already exists'' AS status'
++);
++PREPARE stmt FROM @sql;
++EXECUTE stmt;
++DEALLOCATE PREPARE stmt;
++
++-- 8. Index for filtering by ownership type (e.g. "show all rented assets")
++SET @idx = (
++    SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
++    WHERE TABLE_SCHEMA = DATABASE()
++      AND TABLE_NAME = 'devices'
++      AND INDEX_NAME = 'idx_device_ownership_type'
++);
++SET @sql = IF(@idx = 0,
++    'ALTER TABLE devices ADD INDEX idx_device_ownership_type (ownership_type)',
++    'SELECT ''Index idx_device_ownership_type already exists'' AS status'
++);
++PREPARE stmt FROM @sql;
++EXECUTE stmt;
++DEALLOCATE PREPARE stmt;
++
++SELECT 'Migration 022 applied successfully.' AS status;
+diff --git a/database/migrations/run_022.py b/database/migrations/run_022.py
+new file mode 100644
+index 0000000..618cdc5
+--- /dev/null
++++ b/database/migrations/run_022.py
+@@ -0,0 +1,65 @@
++"""
++Migration 022 Runner: Asset Ownership Type & Rental Vendor Details
++Executes 022_asset_ownership_rental.sql against the configured database.
++
++Adds:
++  - devices.ownership_type (ENUM 'Purchased'/'Rented', default 'Purchased')
++  - devices.vendor_name
++  - devices.vendor_contact
++  - devices.rental_start_date
++  - devices.rental_end_date
++  - devices.rental_cost
++  - devices.rental_cost_frequency
++"""
++import os
++import sys
++import mysql.connector
++
++# Allow running from project root or migrations/ directory
++sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
++from dotenv import load_dotenv
++
++load_dotenv()
++
++
++def run():
++    sql_path = os.path.join(os.path.dirname(__file__), "022_asset_ownership_rental.sql")
++    with open(sql_path, "r") as f:
++        sql = f.read()
++
++    conn = mysql.connector.connect(
++        host=os.getenv("DB_HOST", "localhost"),
++        user=os.getenv("DB_USER", "hrmsuser"),
++        password=os.getenv("DB_PASS", "Altzor@123"),
++        database=os.getenv("DB_NAME", "hrms"),
++        port=int(os.getenv("DB_PORT", 3306)),
++    )
++    cursor = conn.cursor()
++
++    print("🚀 Running Migration 022: Asset Ownership Type & Rental Vendor Details ...")
++
++    try:
++        for result in cursor.execute(sql, multi=True):
++            try:
++                result.fetchall()
++            except mysql.connector.errors.InterfaceError:
++                pass
++
++        conn.commit()
++        print("✅ Migration 022 completed successfully.")
++        print("   Added: devices.ownership_type, vendor_name, vendor_contact,")
++        print("          rental_start_date, rental_end_date, rental_cost, rental_cost_frequency")
++    except mysql.connector.Error as e:
++        conn.rollback()
++        if e.errno == 1060:
++            print(f"  ⏩ Skipped (already applied): {e}")
++        else:
++            print(f"❌ Migration 022 failed: {e}")
++            sys.exit(1)
++    finally:
++        cursor.close()
++        conn.close()
++
++
++if __name__ == "__main__":
++    run()

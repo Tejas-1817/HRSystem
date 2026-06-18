@@ -20,7 +20,8 @@ A robust, modular, production‑ready **Human Resource Management System** built
 - **Project & Resource Allocation** – Fixed‑cost & T&M billing, over‑allocation controls.
 - **Help Desk** – Ticketing with device linkage, audit history, KPI dashboards.
 - **Reimbursements** – Expense claims, receipt uploads, immutable audit trail.
-- **Asset & Device Management** – Inventory, digital agreements, soft‑delete safeguards.
+- **Asset & Device Management** – Inventory, digital agreements, soft‑delete safeguards, hardware specs tracking.
+- **Onboarding & Background Verification** – Candidate workflows, document collection, reference checks, and digital declarations.
 - **Security & RBAC** – Four‑tier roles, JWT auth, token blacklist, cache‑prevention headers.
 - **Notifications & Alerts** – Personal notifications, birthday/holiday alerts.
 
@@ -123,13 +124,14 @@ All protected routes require `Authorization: Bearer <token>`.
 ---
 
 ## 🗂️ Database Schema
-The system uses **27 tables** with foreign‑key relationships. Highlights:
+The system uses **32+ tables** with foreign‑key relationships. Highlights:
 - `employee`, `users`, `attendance`, `timesheets`, `leaves`, `leave_balance`
 - `projects`, `project_assignments`
 - `helpdesk_tickets`, `helpdesk_ticket_history`
 - `reimbursements`, `reimbursement_history`
 - `token_blacklist`, `role_history`
 - `devices`, `device_assignments`, `device_agreements`
+- `onboarding_joinee`, `onboarding_declaration`, `onboarding_documents`
 - …and supporting tables for holidays, notifications, documents, payslips, policies, bank details, audit logs.
 
 ---
@@ -153,6 +155,11 @@ The system uses **27 tables** with foreign‑key relationships. Highlights:
 | `014` | `database/migrations/014_timesheet_edit_history.sql` | Timesheet edit history tracking |
 | `015` | `database/migrations/015_clean_identity_architecture.sql` | Clean identity architecture |
 | `016` | `database/migrations/016_team_member_info_fields.sql` | Additional team member HR fields |
+| `017` | `database/migrations/017_onboarding.sql` | Onboarding module & joinee tracking |
+| `018` | `database/migrations/018_document_type_enum.sql` | Document type enum extensions |
+| `019` | `database/migrations/019_return_asset_enhancements.sql` | Asset return tracking enhancements |
+| `020` | `database/migrations/020_device_hardware_specs.sql` | Device hardware specs (RAM, CPU, Storage) |
+| `021` | `database/migrations/021_device_asset_id.sql` | Custom asset ID support for devices |
 
 Run migrations safely (MySQL‑compatible):
 ```bash
@@ -169,6 +176,10 @@ python database/migrations/run_013.py
 python database/migrations/run_014.py
 python database/migrations/run_015.py
 python database/migrations/run_016.py
+python database/migrations/run_017.py
+python database/migrations/run_019.py
+python database/migrations/run_020.py
+python database/migrations/run_021.py
 ```
 
 ---
