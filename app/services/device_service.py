@@ -102,7 +102,8 @@ def get_device_by_id(device_id: int):
 
 
 def create_device(data: dict) -> int:
-    """Add a new device to the system with optional catalog linkage and purchase metadata."""
+    """Add a new device to the system with optional catalog linkage, purchase metadata,
+    and ownership/rental details (Purchased vs Rented + vendor info)."""
     catalog_id = data.get("catalog_id")
 
     # Auto-link to catalog by brand+model if not explicitly provided
@@ -114,22 +115,45 @@ def create_device(data: dict) -> int:
         if cat:
             catalog_id = cat["id"]
 
+    ownership_type = data.get("ownership_type", "Purchased")
+    if ownership_type not in ("Purchased", "Rented"):
+        raise ValueError("ownership_type must be 'Purchased' or 'Rented'")
+
+    # Vendor / rental fields only make sense when the asset is Rented.
+    # Silently drop them for Purchased assets so stale data can't linger.
+    if ownership_type == "Rented":
+        if not data.get("vendor_name"):
+            raise ValueError("vendor_name is required when ownership_type is 'Rented'")
+        vendor_name = data.get("vendor_name")
+        vendor_contact = data.get("vendor_contact")
+        rental_start_date = data.get("rental_start_date")
+        rental_end_date = data.get("rental_end_date")
+        rental_cost = data.get("rental_cost")
+        rental_cost_frequency = data.get("rental_cost_frequency")
+    else:
+        vendor_name = vendor_contact = rental_start_date = None
+        rental_end_date = rental_cost = rental_cost_frequency = None
+
     device_id = execute_query("""
         INSERT INTO devices (brand, model, serial_number, asset_id, status, device_type,
                              catalog_id, purchase_date, warranty_expiry, condition_notes, location,
-                             processor, ram, storage)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             processor, ram, storage, ownership_type, vendor_name, vendor_contact,
+                             rental_start_date, rental_end_date, rental_cost, rental_cost_frequency)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         data["brand"], data["model"], data["serial_number"], data.get("asset_id"),
         data.get("status", "Available"), data.get("device_type", "Laptop"),
         catalog_id, data.get("purchase_date"), data.get("warranty_expiry"),
         data.get("condition_notes"), data.get("location", "HQ"),
         data.get("processor"), data.get("ram"), data.get("storage"),
+        ownership_type, vendor_name, vendor_contact,
+        rental_start_date, rental_end_date, rental_cost, rental_cost_frequency,
     ), commit=True)
 
     # Log stock event
+    note_suffix = f" ({ownership_type}{' via ' + vendor_name if vendor_name else ''})"
     _log_stock(device_id, catalog_id, "added", data.get("added_by", "system"),
-               new_status="Available", notes=f"New device added: {data['brand']} {data['model']}")
+               new_status="Available", notes=f"New device added: {data['brand']} {data['model']}{note_suffix}")
 
     return device_id
 

@@ -39,11 +39,16 @@ def add_device(current_user):
     required = ["brand", "model", "serial_number"]
     if not all(k in data for k in required):
         return jsonify({"success": False, "error": "brand, model, and serial_number are required"}), 400
-    
+
+    if data.get("ownership_type") == "Rented" and not data.get("vendor_name"):
+        return jsonify({"success": False, "error": "vendor_name is required when ownership_type is 'Rented'"}), 400
+
     try:
         data["added_by"] = current_user["employee_name"]
         device_id = create_device(data)
         return jsonify({"success": True, "device_id": device_id, "message": "Device created"}), 201
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve)}), 400
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
