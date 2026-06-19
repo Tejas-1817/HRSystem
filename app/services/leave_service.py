@@ -15,7 +15,7 @@ from app.models.database import execute_query, execute_single
 # Role hierarchy: who can approve whose leave
 # Format: { requester_role: [allowed_approver_roles] }
 _APPROVAL_MATRIX = {
-    "employee": ["manager", "admin"],
+    "employee": ["manager", "hr", "admin"],
     "hr":       ["admin"],
     "manager":  ["admin"],
     "admin":    [],  # Admins don't need approval
