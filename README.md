@@ -35,7 +35,7 @@ A robust, modular, production‑ready **Human Resource Management System** built
 | **Database** | MySQL 8.0+ |
 | **Auth** | PyJWT (HS256) |
 | **Security** | Werkzeug hashing, RBAC, CORS |
-| **Email** | Flask‑Mail (SMTP) |
+| **Email** | smtplib (SMTP) |
 | **Exports** | openpyxl (Excel) |
 | **Config** | python‑dotenv |
 | **API** | RESTful JSON |
@@ -160,6 +160,7 @@ The system uses **32+ tables** with foreign‑key relationships. Highlights:
 | `019` | `database/migrations/019_return_asset_enhancements.sql` | Asset return tracking enhancements |
 | `020` | `database/migrations/020_device_hardware_specs.sql` | Device hardware specs (RAM, CPU, Storage) |
 | `021` | `database/migrations/021_device_asset_id.sql` | Custom asset ID support for devices |
+| `022` | `database/migrations/022_asset_ownership_rental.sql` | Asset ownership type & rental vendor details |
 
 Run migrations safely (MySQL‑compatible):
 ```bash
@@ -180,6 +181,7 @@ python database/migrations/run_017.py
 python database/migrations/run_019.py
 python database/migrations/run_020.py
 python database/migrations/run_021.py
+python database/migrations/run_022.py
 ```
 
 ---

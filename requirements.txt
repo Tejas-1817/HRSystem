@@ -5,3 +5,6 @@ mysql-connector-python
 openpyxl==3.1.5
 python-dateutil
 python-dotenv
+requests
+pytest
+flake8
