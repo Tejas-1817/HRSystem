@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from app.api.middleware.auth import token_required, role_required
 from app.services.device_service import (
     list_devices, get_device_by_id, create_device,
@@ -17,6 +17,9 @@ from app.services.inventory_service import (
     get_stock_by_catalog,
 )
 from app.utils.file_upload import save_upload
+from app.utils.helpers import log_audit_event
+from app.utils.excel_utils import generate_assets_excel
+from datetime import datetime
 
 device_bp = Blueprint("devices", __name__)
 
@@ -31,6 +34,63 @@ def get_all_devices(current_user):
     }
     devices = list_devices(filters)
     return jsonify({"success": True, "devices": devices, "count": len(devices)}), 200
+
+@device_bp.route("/export", methods=["GET"])
+@role_required(["hr"])
+def export_devices(current_user):
+    """
+    Export Asset Inventory to Excel format.
+    Supports filtering and sorting through query parameters.
+    """
+    try:
+        # Extract filters from request
+        filters = {
+            "status": request.args.get("status"),
+            "brand": request.args.get("brand"),
+            "device_type": request.args.get("device_type"),
+            "category": request.args.get("category"),
+            "ownership_type": request.args.get("ownership_type"),
+            "vendor": request.args.get("vendor"),
+            "location": request.args.get("location"),
+            "assigned_to": request.args.get("assigned_to"),
+            "purchase_date_start": request.args.get("purchase_date_start"),
+            "purchase_date_end": request.args.get("purchase_date_end"),
+            "warranty_expiry_start": request.args.get("warranty_expiry_start"),
+            "warranty_expiry_end": request.args.get("warranty_expiry_end"),
+            "search": request.args.get("search"),
+            "sort_by": request.args.get("sort_by"),
+            "sort_order": request.args.get("sort_order")
+        }
+
+        # Fetch filtered/sorted devices
+        devices = list_devices(filters)
+
+        if not devices:
+            return jsonify({"success": False, "error": "No assets match the selected filters."}), 404
+
+        # Generate Excel
+        generated_by_name = current_user.get("employee_name", "System")
+        excel_data = generate_assets_excel(devices, generated_by_name)
+
+        # Log audit event
+        audit_desc = f"Exported {len(devices)} assets to Excel. Filters applied: {filters}"
+        log_audit_event(
+            user_id=current_user.get("user_id") or current_user.get("id"),
+            event_type="asset_inventory_export",
+            description=audit_desc
+        )
+
+        filename = f"Asset_Inventory_{datetime.now().strftime('%Y_%m_%d_%H_%M')}.xlsx"
+
+        return send_file(
+            excel_data,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to export assets: {str(e)}"}), 500
 
 @device_bp.route("/", methods=["POST"])
 @role_required(["hr"])

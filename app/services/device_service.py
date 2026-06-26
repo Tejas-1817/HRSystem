@@ -22,6 +22,20 @@ def list_devices(filters: dict = None) -> list:
     conditions = []
     params = []
 
+    # Safe allowed columns for sorting to prevent SQL injection
+    allowed_sort_columns = {
+        "asset_name": "d.brand",
+        "asset_id": "d.id",
+        "asset_tag": "d.serial_number",
+        "purchase_date": "d.purchase_date",
+        "vendor": "d.vendor_name",
+        "status": "d.status",
+        "category": "d.device_type"
+    }
+
+    sort_by = "d.created_at"
+    sort_order = "DESC"
+
     if filters:
         if filters.get("status"):
             conditions.append("d.status = %s")
@@ -29,13 +43,44 @@ def list_devices(filters: dict = None) -> list:
         if filters.get("brand"):
             conditions.append("d.brand = %s")
             params.append(filters["brand"])
-        if filters.get("device_type"):
+        if filters.get("device_type") or filters.get("category"):
             conditions.append("d.device_type = %s")
-            params.append(filters["device_type"])
+            params.append(filters.get("category") or filters.get("device_type"))
+        if filters.get("ownership_type"):
+            conditions.append("d.ownership_type = %s")
+            params.append(filters["ownership_type"])
+        if filters.get("vendor"):
+            conditions.append("d.vendor_name = %s")
+            params.append(filters["vendor"])
+        if filters.get("location"):
+            conditions.append("d.location = %s")
+            params.append(filters["location"])
+        if filters.get("assigned_to"):
+            conditions.append("da.employee_name = %s")
+            params.append(filters["assigned_to"])
+        if filters.get("purchase_date_start"):
+            conditions.append("d.purchase_date >= %s")
+            params.append(filters["purchase_date_start"])
+        if filters.get("purchase_date_end"):
+            conditions.append("d.purchase_date <= %s")
+            params.append(filters["purchase_date_end"])
+        if filters.get("warranty_expiry_start"):
+            conditions.append("d.warranty_expiry >= %s")
+            params.append(filters["warranty_expiry_start"])
+        if filters.get("warranty_expiry_end"):
+            conditions.append("d.warranty_expiry <= %s")
+            params.append(filters["warranty_expiry_end"])
         if filters.get("search"):
             conditions.append("(d.brand LIKE %s OR d.model LIKE %s OR d.serial_number LIKE %s)")
             search_param = f"%{filters['search']}%"
             params.extend([search_param] * 3)
+
+        # Handle sorting
+        if filters.get("sort_by") in allowed_sort_columns:
+            sort_by = allowed_sort_columns[filters["sort_by"]]
+        
+        if filters.get("sort_order") and filters["sort_order"].upper() in ["ASC", "DESC"]:
+            sort_order = filters["sort_order"].upper()
 
     # Always exclude soft-deleted devices
     conditions.append("d.is_deleted = FALSE")
@@ -50,14 +95,15 @@ def list_devices(filters: dict = None) -> list:
                e.id AS employee_id,
                e.name AS employee_name,
                e.email AS employee_email,
-               e.phone AS employee_phone
+               e.phone AS employee_phone,
+               e.department AS employee_department
         FROM devices d
         LEFT JOIN device_assignments da
             ON d.id = da.device_id AND da.returned_date IS NULL
         LEFT JOIN employee e
             ON da.employee_name = e.name
         {where_clause}
-        ORDER BY d.created_at DESC
+        ORDER BY {sort_by} {sort_order}
     """, tuple(params) if params else None)
 
     for r in rows:
