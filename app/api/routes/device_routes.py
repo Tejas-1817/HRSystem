@@ -138,18 +138,21 @@ def edit_device(current_user, device_id):
     try:
         from app.services.device_service import update_device_enterprise
         
-        # We accept multipart/form-data for file uploads
-        update_data = dict(request.form)
-        
-        # Collect remove IDs (they might be lists if multiple were sent)
-        remove_doc_ids = request.form.getlist("remove_document_ids")
-        remove_img_ids = request.form.getlist("remove_image_ids")
-        if remove_doc_ids:
-            update_data["remove_document_ids"] = remove_doc_ids
-        if remove_img_ids:
-            update_data["remove_image_ids"] = remove_img_ids
+        # We accept multipart/form-data for file uploads, but fallback to JSON if empty
+        if request.is_json:
+            update_data = request.get_json() or {}
+        else:
+            update_data = dict(request.form)
+            
+            # Collect remove IDs (they might be lists if multiple were sent via form data)
+            remove_doc_ids = request.form.getlist("remove_document_ids")
+            remove_img_ids = request.form.getlist("remove_image_ids")
+            if remove_doc_ids:
+                update_data["remove_document_ids"] = remove_doc_ids
+            if remove_img_ids:
+                update_data["remove_image_ids"] = remove_img_ids
 
-        files = request.files
+        files = request.files or {}
 
         result = update_device_enterprise(
             device_id=device_id,
