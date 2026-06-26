@@ -585,3 +585,197 @@ def soft_delete_device(device_id: int, deleted_by: str) -> dict:
         "device_label": device_label,
         "deleted_by": deleted_by,
     }
+
+def update_device_enterprise(
+    device_id: int, 
+    update_data: dict, 
+    files: dict, 
+    current_user: dict, 
+    ip_address: str = None, 
+    user_agent: str = None
+) -> dict:
+    """
+    Enterprise-grade asset update with transaction safety and immutable audit logging.
+    Allows HR/Admin to edit basic information, device info, and inventory info.
+    Supports uploading and replacing documents.
+    """
+    from app.utils.helpers import log_audit_event
+    from app.utils.file_upload import save_upload
+
+    # 1. Fetch current device
+    device = execute_single("SELECT * FROM devices WHERE id = %s", (device_id,))
+    if not device:
+        raise LookupError("Asset not found")
+    if device.get("is_deleted"):
+        raise ValueError("Cannot edit a soft-deleted asset")
+
+    # 2. Extract allowed fields from update_data
+    allowed_fields = {
+        "brand": "Manufacturer/Brand",
+        "device_type": "Asset Category",
+        "asset_id": "Asset Tag",
+        "condition_notes": "Asset Condition/Notes",
+        "model": "Model",
+        "serial_number": "Serial Number",
+        "location": "Office Location",
+        "status": "Asset Status",
+        "ownership_type": "Ownership Type",
+        "vendor_name": "Vendor Name",
+        "vendor_contact": "Vendor Contact",
+        "rental_start_date": "Rental Start Date",
+        "rental_end_date": "Rental End Date",
+        "rental_cost": "Rental Cost",
+        "rental_cost_frequency": "Rental Cost Frequency",
+        "purchase_date": "Purchase Date",
+        "warranty_expiry": "Warranty Expiry"
+    }
+
+    # 3. Status Transition Rules
+    new_status = update_data.get("status")
+    if new_status and new_status != device["status"]:
+        valid_statuses = {"Available", "Assigned", "Under Repair", "Retired", "Lost"}
+        if new_status not in valid_statuses:
+            raise ValueError(f"Invalid status: {new_status}")
+            
+        if device["status"] == "Assigned" and new_status == "Available":
+            raise ValueError("CONFLICT: Cannot change status from ASSIGNED to AVAILABLE directly. Use the Return Asset workflow first.")
+
+    # 4. Check Unique Constraints if changed
+    if "asset_id" in update_data and update_data["asset_id"] != device["asset_id"]:
+        if execute_single("SELECT id FROM devices WHERE asset_id = %s AND id != %s AND is_deleted = FALSE", (update_data["asset_id"], device_id)):
+            raise ValueError("Duplicate Asset Tag")
+            
+    if "serial_number" in update_data and update_data["serial_number"] != device["serial_number"]:
+        if execute_single("SELECT id FROM devices WHERE serial_number = %s AND id != %s AND is_deleted = FALSE", (update_data["serial_number"], device_id)):
+            raise ValueError("Duplicate Serial Number")
+
+    # 5. Build updates and track changes for audit log
+    changes_made = []
+    update_cols = []
+    update_vals = []
+    
+    for db_col, human_label in allowed_fields.items():
+        if db_col in update_data:
+            new_val = update_data[db_col]
+            old_val = device.get(db_col)
+            
+            # Normalize empty strings to None to match DB nulls in comparison
+            if new_val == "":
+                new_val = None
+                
+            if old_val != new_val:
+                update_cols.append(f"{db_col} = %s")
+                update_vals.append(new_val)
+                changes_made.append({
+                    "field": human_label,
+                    "old": str(old_val) if old_val is not None else "None",
+                    "new": str(new_val) if new_val is not None else "None"
+                })
+
+    # 6. Execute Transaction
+    with Transaction() as cursor:
+        # Update Device Record
+        if update_cols:
+            update_vals.append(device_id)
+            query = f"UPDATE devices SET {', '.join(update_cols)}, updated_at = NOW() WHERE id = %s"
+            cursor.execute(query, tuple(update_vals))
+
+        # Handle Documents
+        for doc_key, file in files.items():
+            if file and file.filename:
+                # Determine type based on key (e.g., file_invoice -> Invoice)
+                doc_type_mapping = {
+                    "file_invoice": "Invoice",
+                    "file_warranty": "Warranty",
+                    "file_purchase": "Purchase Document",
+                    "file_image": "Asset Image",
+                    "file_manual": "User Manual",
+                    "file_other": "Other Attachments"
+                }
+                doc_type = doc_type_mapping.get(doc_key, "Other Attachments")
+                
+                # Save file via unified utility
+                file_url = save_upload(file, folder="devices")
+                
+                if doc_type == "Asset Image":
+                    cursor.execute(
+                        "INSERT INTO device_images (device_id, image_url) VALUES (%s, %s)", 
+                        (device_id, file_url)
+                    )
+                else:
+                    cursor.execute(
+                        "INSERT INTO device_documents (device_id, document_type, file_url) VALUES (%s, %s, %s)", 
+                        (device_id, doc_type, file_url)
+                    )
+                    
+                changes_made.append({
+                    "field": f"Uploaded {doc_type}",
+                    "old": "None",
+                    "new": file.filename
+                })
+
+        # 6.5 Handle Document/Image Removal
+        if "remove_document_ids" in update_data and update_data["remove_document_ids"]:
+            doc_ids = update_data["remove_document_ids"]
+            if isinstance(doc_ids, str):
+                doc_ids = [doc_ids]
+            # Convert to ints safely
+            doc_ids = [int(i) for i in doc_ids if str(i).isdigit()]
+            if doc_ids:
+                format_strings = ','.join(['%s'] * len(doc_ids))
+                cursor.execute(f"DELETE FROM device_documents WHERE device_id = %s AND id IN ({format_strings})", (device_id, *doc_ids))
+                changes_made.append({
+                    "field": "Removed Documents",
+                    "old": f"IDs: {doc_ids}",
+                    "new": "None"
+                })
+
+        if "remove_image_ids" in update_data and update_data["remove_image_ids"]:
+            img_ids = update_data["remove_image_ids"]
+            if isinstance(img_ids, str):
+                img_ids = [img_ids]
+            img_ids = [int(i) for i in img_ids if str(i).isdigit()]
+            if img_ids:
+                format_strings = ','.join(['%s'] * len(img_ids))
+                cursor.execute(f"DELETE FROM device_images WHERE device_id = %s AND id IN ({format_strings})", (device_id, *img_ids))
+                changes_made.append({
+                    "field": "Removed Images",
+                    "old": f"IDs: {img_ids}",
+                    "new": "None"
+                })
+
+        # 7. Audit Logging
+        user_id = current_user.get("user_id") or current_user.get("id")
+        user_name = current_user.get("employee_name", "Unknown")
+        
+        for change in changes_made:
+            audit_desc = (
+                f"Asset ID: {device_id}\n"
+                f"Edited By: {user_name}\n"
+                f"Changed Field: {change['field']}\n"
+                f"Old: {change['old']}\n"
+                f"New: {change['new']}"
+            )
+            
+            cursor.execute("""
+                INSERT INTO audit_logs (user_id, event_type, description, ip_address, user_agent)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, "asset_edited", audit_desc, ip_address, user_agent))
+
+        if new_status and new_status != device["status"]:
+            # Log stock event if status changed
+            _log_stock(
+                device_id, 
+                device.get("catalog_id"), 
+                "status_changed", 
+                user_name,
+                old_status=device["status"], 
+                new_status=new_status,
+                notes=f"Status manually updated during edit"
+            )
+
+    return {
+        "device_id": device_id,
+        "changes_count": len(changes_made),
+        "updated_fields": [c["field"] for c in changes_made]
+    }

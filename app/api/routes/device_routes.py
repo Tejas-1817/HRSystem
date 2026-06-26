@@ -128,6 +128,54 @@ def get_device(current_user, device_id):
             
     return jsonify({"success": True, "device": device}), 200
 
+@device_bp.route("/<int:device_id>", methods=["PUT"])
+@role_required(["hr", "admin"])
+def edit_device(current_user, device_id):
+    """
+    Enterprise Asset Edit API
+    Updates basic info, device info, inventory info, and handles documents.
+    """
+    try:
+        from app.services.device_service import update_device_enterprise
+        
+        # We accept multipart/form-data for file uploads
+        update_data = dict(request.form)
+        
+        # Collect remove IDs (they might be lists if multiple were sent)
+        remove_doc_ids = request.form.getlist("remove_document_ids")
+        remove_img_ids = request.form.getlist("remove_image_ids")
+        if remove_doc_ids:
+            update_data["remove_document_ids"] = remove_doc_ids
+        if remove_img_ids:
+            update_data["remove_image_ids"] = remove_img_ids
+
+        files = request.files
+
+        result = update_device_enterprise(
+            device_id=device_id,
+            update_data=update_data,
+            files=files,
+            current_user=current_user,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent")
+        )
+
+        return jsonify({
+            "success": True, 
+            "message": f"Asset {device_id} updated successfully.",
+            **result
+        }), 200
+
+    except LookupError as e:
+        return jsonify({"success": False, "error": str(e)}), 404
+    except ValueError as e:
+        msg = str(e)
+        if msg.startswith("CONFLICT:"):
+            return jsonify({"success": False, "error": msg[len("CONFLICT:"):]}), 409
+        return jsonify({"success": False, "error": msg}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @device_bp.route("/<int:device_id>/assign", methods=["POST"])
 @role_required(["hr"])
 def allocate_device(current_user, device_id):
