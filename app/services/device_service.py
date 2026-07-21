@@ -609,6 +609,12 @@ def update_device_enterprise(
     if device.get("is_deleted"):
         raise ValueError("Cannot edit a soft-deleted asset")
 
+    # 1b. The frontend edit form sends "device_name", but the DB column is
+    # "brand". Normalize so it lands in the whitelist loop below instead of
+    # being silently dropped.
+    if "device_name" in update_data and "brand" not in update_data:
+        update_data["brand"] = update_data["device_name"]
+
     # 2. Extract allowed fields from update_data
     allowed_fields = {
         "brand": "Manufacturer/Brand",
@@ -620,6 +626,9 @@ def update_device_enterprise(
         "location": "Office Location",
         "status": "Asset Status",
         "ownership_type": "Ownership Type",
+        "processor": "Processor",
+        "ram": "RAM",
+        "storage": "Storage",
         "vendor_name": "Vendor Name",
         "vendor_contact": "Vendor Contact",
         "rental_start_date": "Rental Start Date",
