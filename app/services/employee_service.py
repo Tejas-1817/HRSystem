@@ -129,24 +129,31 @@ def create_employee_record(data, role, cursor, with_user=True, created_by=None, 
     return employee_name, clean_name
 
 
-def update_employee_role(admin_id, employee_id, new_role):
+def update_employee_role(actor_user_id, target_user_id, new_role):
     """
-    DEPRECATED: Use app.services.team_member_service.update_team_member_role
+    Update a user's role and ensure employee status consistency.
+    Includes guardrail: only superadmin can assign or modify admin/superadmin roles.
     """
-    valid_roles = ['admin', 'hr', 'manager', 'employee', 'team_member']
+    valid_roles = ["employee", "manager", "hr", "admin", "team_member", "superadmin"]
     if new_role not in valid_roles:
-        raise ValueError(f"Invalid role: {new_role}. Must be one of {', '.join(valid_roles)}")
+        raise ValueError("Invalid role provided")
 
     with Transaction() as cursor:
-        # 1. Fetch current state using the transaction-bound cursor
-        cursor.execute("SELECT id, role, employee_name FROM users WHERE id=%s", (employee_id,))
-        user = cursor.fetchone()
+        # Get target user's old role
+        target = execute_single("SELECT role, employee_name FROM users WHERE id = %s", (target_user_id,))
+        if not target:
+            raise ValueError("Target user not found")
+        old_role = target["role"]
+        system_id = target["employee_name"]
         
-        if not user:
-            raise ValueError(get_message("not_found"))
-
-        old_role = user['role']
-        system_id = user['employee_name']
+        # Get actor user's role
+        actor = execute_single("SELECT role FROM users WHERE id = %s", (actor_user_id,))
+        if not actor:
+            raise ValueError("Actor user not found")
+        actor_role = actor["role"]
+        
+        if (old_role in ['admin', 'superadmin'] or new_role in ['admin', 'superadmin']) and actor_role != 'superadmin':
+            raise ValueError("Only superadmin can modify or assign admin/superadmin roles.")
 
         # 2. Early exit if no change needed
         if old_role == new_role:
@@ -160,14 +167,14 @@ def update_employee_role(admin_id, employee_id, new_role):
         logger.info(f"Updating role: {system_id} ({old_role}) -> ({new_role})")
 
         # 3. Atomic Updates: Authentication & Profile
-        cursor.execute("UPDATE users SET role=%s WHERE id=%s", (new_role, employee_id))
+        cursor.execute("UPDATE users SET role=%s WHERE id=%s", (new_role, target_user_id))
         cursor.execute("UPDATE employee SET role=%s WHERE name=%s", (new_role, system_id))
 
         # 4. Compliance & Audit: Role History
         cursor.execute("""
             INSERT INTO role_history (employee_name, old_role, new_role, changed_by_user_id, notes)
             VALUES (%s, %s, %s, %s, %s)
-        """, (system_id, old_role, new_role, admin_id, f"Role updated by Admin {admin_id}"))
+        """, (system_id, old_role, new_role, actor_user_id, f"Role updated by Admin {actor_user_id}"))
 
         # 5. Lifecycle Event: Internal Notification
         cursor.execute("""
@@ -183,7 +190,7 @@ def update_employee_role(admin_id, employee_id, new_role):
         cursor.execute("""
             INSERT INTO audit_logs (user_id, event_type, description)
             VALUES (%s, %s, %s)
-        """, (admin_id, "role_change", f"Role updated for {system_id} from {old_role} to {new_role}"))
+        """, (actor_user_id, "role_change", f"Role updated for {system_id} from {old_role} to {new_role}"))
 
         return {
             "success": True,

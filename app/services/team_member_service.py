@@ -248,62 +248,50 @@ def create_team_member_record(data, role, cursor, with_user=True, created_by=Non
     return team_member_id, clean_name
 
 
-def update_team_member_role(admin_id, team_member_id, new_role):
+def update_team_member_role(actor_user_id, target_user_id, new_role):
     """
-    Updates a team member's role with full atomic integrity.
-    
-    Handles prefix-based naming changes (e.g., T_ -> M_) across the entire system.
-    Returns success status and a flag indicating if the user must re-authenticate.
-    
-    Args:
-        admin_id: ID of the admin making the change
-        team_member_id: ID of the team member whose role is being updated
-        new_role: New role to assign (admin, hr, manager, team_member)
-    
-    Returns:
-        Dictionary with success status, message, and role change details
-    
-    Raises:
-        ValueError: If role is invalid or team member not found
+    Update users role and ensure team member status consistency.
+    Includes guardrail: only superadmin can assign or modify admin/superadmin roles.
     """
-    valid_roles = ['admin', 'hr', 'manager', 'team_member', 'employee']  # Include 'employee' for backward compat
+    valid_roles = ["employee", "manager", "hr", "admin", "team_member", "superadmin"]
     if new_role not in valid_roles:
-        raise ValueError(f"Invalid role: {new_role}. Must be one of {', '.join(valid_roles)}")
+        raise ValueError("Invalid role provided")
 
     with Transaction() as cursor:
-        # 1. Fetch current state
-        cursor.execute("SELECT id, role, employee_name FROM users WHERE id=%s", (team_member_id,))
-        user = cursor.fetchone()
+        target = execute_single("SELECT role, employee_name FROM users WHERE id = %s", (target_user_id,))
+        if not target:
+            raise ValueError("User not found")
+        old_role = target["role"]
+        system_id = target["employee_name"]
         
-        if not user:
-            raise ValueError(get_message("not_found"))
+        actor = execute_single("SELECT role FROM users WHERE id = %s", (actor_user_id,))
+        if not actor:
+            raise ValueError("Actor user not found")
+        actor_role = actor["role"]
         
-        old_role = user['role']
-        system_id = user['employee_name']
-
-        # 2. Early exit if no change needed
+        if (old_role in ['admin', 'superadmin'] or new_role in ['admin', 'superadmin']) and actor_role != 'superadmin':
+            raise ValueError("Only superadmin can modify or assign admin/superadmin roles.")
+            
         if old_role == new_role:
             return {
                 "success": True, 
-                "message": f"{get_label('entity')} already has this role.", 
+                "message": f"Entity already has this role.", 
                 "no_change": True,
                 "reauth_required": False
             }
-
         logger.info(f"Updating team member role: {system_id} ({old_role}) -> ({new_role})")
 
         # 3. Atomic Updates: Authentication & Profile
         # Because we no longer use prefixed names, the system_id remains exactly the same!
         # There is NO NEED to cascade rename across 15+ tables.
-        cursor.execute("UPDATE users SET role=%s WHERE id=%s", (new_role, team_member_id))
+        cursor.execute("UPDATE users SET role=%s WHERE id=%s", (new_role, target_user_id))
         cursor.execute("UPDATE employee SET role=%s WHERE name=%s", (new_role, system_id))
 
         # 4. Compliance & Audit: Role History
         cursor.execute("""
             INSERT INTO role_history (employee_name, old_role, new_role, changed_by_user_id, notes)
             VALUES (%s, %s, %s, %s, %s)
-        """, (system_id, old_role, new_role, admin_id, 
-              f"Role updated by Admin {admin_id}"))
+        """, (system_id, old_role, new_role, actor_user_id, f"Role updated by Admin {actor_user_id}"))
 
         # 5. Lifecycle Event: Internal Notification
         cursor.execute("""
@@ -318,11 +306,11 @@ def update_team_member_role(admin_id, team_member_id, new_role):
                        new_role=new_role.upper())
         ))
 
-        # 6. Audit Logging with modern terminology
+        # 6. Security Audit Logging
         cursor.execute("""
             INSERT INTO audit_logs (user_id, event_type, description)
             VALUES (%s, %s, %s)
-        """, (admin_id, "role_change", 
+        """, (actor_user_id, "role_change", 
               get_audit_event("entity_role_changed", 
                             name=system_id) + f" ({old_role} → {new_role})"))
 

@@ -16,9 +16,9 @@ def initialize_super_admin(username, password, name):
     """
     try:
         with Transaction() as cursor:
-            # 1. Check if admin already exists
-            cursor.execute("SELECT id FROM users WHERE role = 'admin'")
-            if cursor.fetchone():
+            # 1. Check if superadmin already exists
+            cursor.execute("SELECT id FROM users WHERE role = 'superadmin'")
+            if cursor.fetchall():
                 print("⚠️  A Super Admin already exists in the system.")
                 return False
 
@@ -30,14 +30,31 @@ def initialize_super_admin(username, password, name):
             }
             
             # 2. Create employee record (A_ John)
-            employee_name, original_name = create_employee_record(data, "admin", cursor, with_user=False)
+            employee_name, original_name = create_employee_record(data, "superadmin", cursor, with_user=False)
             
-            # 3. Create user credentials with 'admin' role
+            # 3. Create user credentials with 'superadmin' role
             hashed_password = generate_password_hash(password)
             cursor.execute("""
-                INSERT INTO users (username, original_name, password, role, employee_name, password_change_required)
-                VALUES (%s, %s, %s, 'admin', %s, FALSE)
-            """, (username, original_name, hashed_password, employee_name))
+                INSERT INTO users (
+                    username,
+                    email,
+                    original_name,
+                    password,
+                    password_hash,
+                    role,
+                    employee_name,
+                    password_change_required
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, 'superadmin', %s, FALSE)""", 
+                    (
+                username,          # username
+                username,          # email
+                original_name,
+                hashed_password,   # password
+                hashed_password,   # password_hash
+                employee_name
+            ))
             
             print(f"✅ Super Admin '{username}' created successfully as '{employee_name}'.")
             return True

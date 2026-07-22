@@ -7,7 +7,7 @@ import hashlib
 from datetime import datetime, timedelta
 from app.config import Config
 from app.models.database import get_connection, execute_query, execute_single, Transaction
-from app.api.middleware.auth import token_required, role_required, onboarding_required
+from app.api.middleware.auth import token_required, role_required, onboarding_required, permission_required, superadmin_required
 from app.utils.helpers import generate_unique_username, cascade_rename_employee, log_audit_event
 from app.services.leave_service import allocate_default_leaves
 from app.services.employee_service import create_employee_record, update_employee_role
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.route("/register", methods=["POST"])
-@role_required(["hr"])
+@permission_required("auth.register")
 def register(current_user):
     try:
         data = request.get_json()
@@ -287,7 +287,7 @@ def get_profile(current_user):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @auth_bp.route("/users", methods=["GET"])
-@role_required(["hr"])
+@permission_required("auth.list_users")
 def get_all_users(current_user):
     users = execute_query("SELECT id, username, original_name, role, employee_name, is_active, created_at FROM users ORDER BY role, username")
     # Enrich each user with full_name and display_name
@@ -296,7 +296,7 @@ def get_all_users(current_user):
     return jsonify({"success": True, "users": users}), 200
 
 @auth_bp.route("/users/<int:user_id>/role", methods=["PATCH"])
-@role_required(["admin"])
+@role_required(["admin", "superadmin"])
 def update_user_role(current_user, user_id):
     try:
         data = request.get_json()
@@ -317,7 +317,7 @@ def update_user_role(current_user, user_id):
 # --- Super Admin Management Endpoints ---
 
 @auth_bp.route("/admin/audit-logs", methods=["GET"])
-@role_required(["admin"])
+@superadmin_required
 def get_audit_logs(current_user):
     """View all system activity logs (Admin only)."""
     try:
@@ -333,7 +333,7 @@ def get_audit_logs(current_user):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @auth_bp.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
-@role_required(["admin"])
+@superadmin_required
 def admin_reset_password(current_user, user_id):
     """Force reset any user's password (Admin only)."""
     try:
