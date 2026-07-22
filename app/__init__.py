@@ -10,7 +10,7 @@ def create_app():
     app = Flask(__name__)
     app.url_map.strict_slashes = False
     frontend_url = os.getenv("FRONTEND_URL", "http://13.205.90.13:5002")
-    CORS(app, origins=[frontend_url, "http://localhost:5002", "http://127.0.0.1:5002"])
+    CORS(app, resources={r"/*": {"origins": "*"}})
     
     @app.route("/health")
     def health_check():
@@ -84,6 +84,7 @@ def create_app():
     from app.api.routes.announcement_routes import announcement_bp
     from app.api.routes.department_routes import department_bp
     from app.api.routes.superadmin_routes import superadmin_bp
+    from app.api.routes.rental_routes import rental_bp
     from app.onboarding import onboarding_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
@@ -105,6 +106,7 @@ def create_app():
     app.register_blueprint(profile_bp)  # /profile/<employee_name> — team member profile pages
     app.register_blueprint(announcement_bp, url_prefix='/announcements')
     app.register_blueprint(superadmin_bp) # Routes like /admin/permissions
+    app.register_blueprint(rental_bp, url_prefix='/rentals')
     app.register_blueprint(onboarding_bp, url_prefix='/onboarding')
 
     @app.after_request
