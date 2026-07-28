@@ -86,6 +86,7 @@ def create_app():
     from app.api.routes.superadmin_routes import superadmin_bp
     from app.api.routes.rental_routes import rental_bp
     from app.onboarding import onboarding_bp
+    from app.offboarding.routes import offboarding_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(employee_bp, url_prefix='/employees')
@@ -108,6 +109,7 @@ def create_app():
     app.register_blueprint(superadmin_bp) # Routes like /admin/permissions
     app.register_blueprint(rental_bp, url_prefix='/rentals')
     app.register_blueprint(onboarding_bp, url_prefix='/onboarding')
+    app.register_blueprint(offboarding_bp, url_prefix='/offboarding')
 
     @app.after_request
     def add_security_headers(response):

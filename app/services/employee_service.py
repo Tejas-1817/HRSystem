@@ -134,7 +134,7 @@ def update_employee_role(actor_user_id, target_user_id, new_role):
     Update a user's role and ensure employee status consistency.
     Includes guardrail: only superadmin can assign or modify admin/superadmin roles.
     """
-    valid_roles = ["employee", "manager", "hr", "admin", "team_member", "superadmin"]
+    valid_roles = ["employee", "manager", "hr", "admin", "team_member", "superadmin", "accounts"]
     if new_role not in valid_roles:
         raise ValueError("Invalid role provided")
 
