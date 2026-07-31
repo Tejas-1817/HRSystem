@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app.models.database import execute_query
+from app.models.database import execute_query, execute_single
 from app.api.middleware.auth import token_required, role_required
 
 holiday_bp = Blueprint('holidays', __name__)
@@ -28,11 +28,16 @@ def get_holidays(current_user):
 def add_holiday(current_user):
     """Add a new holiday (HR only)."""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         required = ("name", "date")
-        if not all(k in data for k in required):
+        if not all(k in data and data[k] for k in required):
             return jsonify({"success": False, "error": "Missing name or date"}), 400
             
+        # Phase 5: Duplicate prevention - check if holiday exists on this date
+        existing = execute_single("SELECT id, name FROM holidays WHERE date = %s", (data["date"],))
+        if existing:
+            return jsonify({"success": False, "error": f"A holiday ('{existing['name']}') is already scheduled for {data['date']}."}), 400
+
         holiday_type = data.get("type", "public")
         execute_query("""
             INSERT INTO holidays (name, date, type, description)

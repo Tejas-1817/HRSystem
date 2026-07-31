@@ -81,6 +81,31 @@ def _resolve_manager_name_from_payload(data):
     return None
 
 
+@project_bp.route("/employee/<employee_name>", methods=["GET"])
+@role_required(["hr", "manager", "admin"])
+def get_employee_projects(current_user, employee_name):
+    """Return active projects for a specific employee (for profile page view)."""
+    from urllib.parse import unquote
+    name = unquote(employee_name)
+    try:
+        select_cols = _project_select_columns()
+        manager_join = _manager_join_clause()
+        rows = execute_query(
+            f"""
+            SELECT DISTINCT {select_cols}
+            FROM projects p
+            INNER JOIN project_assignments pa ON p.id = pa.project_id
+            {manager_join}
+            WHERE pa.employee_name = %s AND pa.status = 'active'
+            """,
+            (name,),
+        )
+        return jsonify({"success": True, "projects": serialize_projects(rows)}), 200
+    except Exception as e:
+        logger.error(f"Error fetching projects for employee {name}: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to fetch employee projects"}), 500
+
+
 @project_bp.route("/", methods=["GET"])
 @token_required
 def view_projects(current_user):

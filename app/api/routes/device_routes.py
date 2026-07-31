@@ -254,6 +254,16 @@ def get_my_gear(current_user):
     devices = get_employee_devices(current_user["employee_name"])
     return jsonify({"success": True, "devices": devices}), 200
 
+@device_bp.route("/employee/<employee_name>", methods=["GET"])
+@role_required(["hr", "manager", "admin"])
+def get_devices_for_employee(current_user, employee_name):
+    """Return all currently-assigned devices for a specific employee.
+    Accessible by HR, Manager, and Admin — unlike GET /devices/ which is HR-only
+    and accepts no employee_name filter."""
+    from urllib.parse import unquote
+    devices = get_employee_devices(unquote(employee_name))
+    return jsonify({"success": True, "devices": devices, "count": len(devices)}), 200
+
 @device_bp.route("/<int:device_id>/history", methods=["GET"])
 @role_required(["hr"])
 def get_history(current_user, device_id):

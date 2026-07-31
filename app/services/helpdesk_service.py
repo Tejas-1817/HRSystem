@@ -109,6 +109,13 @@ def get_tickets(current_user: dict, filters: dict) -> list:
         conditions.append("t.assigned_to = %s")
         params.append(assigned_to)
 
+    # Optional employee_name filter — HR/Admin viewing a specific employee's profile
+    # Additive only: when omitted, existing unfiltered HR/Admin views are unchanged
+    filter_employee = filters.get("employee_name")
+    if filter_employee and role not in ("employee", "manager"):
+        conditions.append("t.employee_name = %s")
+        params.append(filter_employee)
+
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     rows = execute_query(f"""
