@@ -134,5 +134,27 @@ def create_app():
     def home():
         return {"success": True, "message": "Welcome to the Modular HR Management API"}
 
-    return app
+    # ── Phase 5: APScheduler Setup (Background Leave Credit Sweep) ──────────
+    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
+            from app.services.leave_credit_service import run_credit_sweep
+            
+            scheduler = BackgroundScheduler()
+            
+            # Run every day at 1:00 AM
+            scheduler.add_job(
+                func=lambda: run_credit_sweep(),
+                trigger="cron",
+                hour=1,
+                minute=0,
+                id="daily_leave_credit_sweep",
+                replace_existing=True
+            )
+            
+            scheduler.start()
+            logger.info("APScheduler started with daily leave credit sweep job at 01:00 AM.")
+        except Exception as e:
+            logger.error(f"Failed to start APScheduler: {e}")
 
+    return app

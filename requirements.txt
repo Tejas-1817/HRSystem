@@ -8,3 +8,4 @@ python-dotenv
 requests
 pytest
 flake8
+APScheduler==3.10.4

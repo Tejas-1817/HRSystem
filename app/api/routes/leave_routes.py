@@ -39,9 +39,46 @@ LEAVE_CALENDAR_LABELS = {
 VALID_HALF_DAY_PERIODS = {"first_half", "second_half"}
 
 
+from app.services.leave_credit_service import run_credit_sweep
+
+# ---------------------------------------------------------------------------
+# Phase 6: Manual Trigger for Leave Credit Sweep
+# ---------------------------------------------------------------------------
+
+@leave_bp.route("/admin/credit-quarterly", methods=["POST"])
+@token_required
+@role_required(["admin", "hr"])
+def manual_credit_sweep(current_user):
+    """
+    Manually trigger the quarterly leave credit sweep.
+    Accepts an optional 'employee_name' in JSON body to restrict the sweep.
+    """
+    data = request.get_json() or {}
+    employee_name_filter = data.get("employee_name")
+
+    try:
+        summary = run_credit_sweep(
+            employee_name_filter=employee_name_filter,
+            credited_by=current_user["employee_name"]
+        )
+        return jsonify({
+            "success": True,
+            "message": "Leave credit sweep completed successfully.",
+            "data": summary
+        }), 200
+    except Exception as e:
+        logger.error(f"Error during manual leave credit sweep: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Failed to run leave credit sweep",
+            "message": str(e)
+        }), 500
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _serialize_leave(row: dict) -> dict:
     """Ensure date/Decimal fields are JSON-serialisable."""

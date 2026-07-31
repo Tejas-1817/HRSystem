@@ -160,12 +160,25 @@ def allocate_default_leaves(employee_name, cursor=None):
         employee_name: The employee's system name (e.g., T_Kartik).
         cursor: Optional MySQL cursor. If provided, executes on the cursor
                 (caller must commit). If None, uses execute_query with auto-commit.
+
+    Phase 3 note:
+        Planned, Unplanned, and Optional leaves are inserted with
+        total_leaves = 0. The quarterly credit scheduler is the *only*
+        mechanism that increments those three balances. Inserting them at
+        their full annual amount here would cause double-crediting once the
+        scheduler runs, because it would add on top of the initial full amount.
+        All other leave types (sick, casual, earned, …) are unaffected.
     """
+    # Leave types managed exclusively by the quarterly credit scheduler.
+    # They must start at 0 to avoid double-crediting.
+    QUARTERLY_LEAVE_TYPES = {"planned", "unplanned", "optional"}
+
     config = get_leave_config()
 
     for entry in config:
         leave_type   = entry["leave_type"]
-        total_leaves = entry["total_leaves"]
+        # For quarterly-managed types, override to 0 regardless of config value.
+        total_leaves = 0 if leave_type.lower() in QUARTERLY_LEAVE_TYPES else entry["total_leaves"]
 
         if cursor:
             # Use the shared cursor (caller commits the transaction)
@@ -179,6 +192,21 @@ def allocate_default_leaves(employee_name, cursor=None):
                 INSERT IGNORE INTO leave_balance (employee_name, leave_type, total_leaves, used_leaves)
                 VALUES (%s, %s, %s, 0)
             """, (employee_name, leave_type, total_leaves), commit=True)
+
+    # Also ensure the quarterly-managed types have a zero row even if
+    # they are not in leave_config yet (they may be added later).
+    for qt in sorted(QUARTERLY_LEAVE_TYPES):
+        if not any(e["leave_type"].lower() == qt for e in config):
+            if cursor:
+                cursor.execute("""
+                    INSERT IGNORE INTO leave_balance (employee_name, leave_type, total_leaves, used_leaves)
+                    VALUES (%s, %s, 0, 0)
+                """, (employee_name, qt))
+            else:
+                execute_query("""
+                    INSERT IGNORE INTO leave_balance (employee_name, leave_type, total_leaves, used_leaves)
+                    VALUES (%s, %s, 0, 0)
+                """, (employee_name, qt), commit=True)
 
 
 def get_employee_balance(employee_name):
