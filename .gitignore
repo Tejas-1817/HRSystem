@@ -1,3 +1,33 @@
-app/api/routes/__pycache__/leave_routes.cpython-313.pyc
-app/api/routes/__pycache__/leave_routes.cpython-313.pyc
+# Environments
+venv/
+env/
+ENV/
+.venv/
+
+# Environment Variables
 .env
+.env.*
+!.env.example
+!.env.production
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs and Databases
+*.log
+*.sqlite3
+*.db
+
+# Uploads / Media (User generated content)
+uploads/
+app/static/uploads/
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# Deployment specific
+deployment/hrms_dump.sql
