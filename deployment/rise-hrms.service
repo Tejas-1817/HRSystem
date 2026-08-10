@@ -1,0 +1,29 @@
+# Gunicorn systemd service file for RISE HRMS
+# -------------------------------------------------------
+# Ask Santosh to create this file on the VM via SSH:
+#   sudo nano /etc/systemd/system/rise-hrms.service
+# Then paste the content below (everything between the dashes)
+# -------------------------------------------------------
+
+[Unit]
+Description=Gunicorn instance for RISE HRMS
+After=network.target mysql.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/rise/public_html/HRMS
+Environment="PATH=/var/www/rise/public_html/HRMS/venv/bin"
+EnvironmentFile=/var/www/rise/public_html/HRMS/.env
+ExecStart=/var/www/rise/public_html/HRMS/venv/bin/gunicorn \
+          --workers 3 \
+          --bind 127.0.0.1:8000 \
+          --timeout 120 \
+          --access-logfile /var/log/rise-hrms-access.log \
+          --error-logfile /var/log/rise-hrms-error.log \
+          run:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

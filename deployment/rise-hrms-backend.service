@@ -1,0 +1,22 @@
+[Unit]
+Description=Gunicorn instance for RISE HRMS Backend (API)
+After=network.target mysql.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/rise/public_html/HRMS/HRSystem
+Environment="PATH=/var/www/rise/public_html/HRMS/HRSystem/venv/bin"
+EnvironmentFile=/var/www/rise/public_html/HRMS/HRSystem/.env
+ExecStart=/var/www/rise/public_html/HRMS/HRSystem/venv/bin/gunicorn \
+          --workers 3 \
+          --bind 127.0.0.1:8000 \
+          --timeout 120 \
+          --access-logfile /var/log/rise-hrms-backend-access.log \
+          --error-logfile /var/log/rise-hrms-backend-error.log \
+          run:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
