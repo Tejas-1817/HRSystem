@@ -74,8 +74,8 @@ def get_tickets(current_user: dict, filters: dict) -> list:
     conditions = []
     params = []
 
-    # Scope to own tickets for regular employees and managers
-    if role in ("employee", "manager"):
+    # Scope to own tickets for everyone except admin
+    if role != "admin":
         conditions.append("t.employee_name = %s")
         params.append(emp)
 
@@ -177,14 +177,14 @@ def get_ticket_history(ticket_id: int) -> list:
 def can_view_ticket(current_user: dict, ticket: dict) -> bool:
     """
     Strict ticket visibility:
-      - employee / manager → own tickets only
-      - hr / admin → all tickets
+      - employee / manager / hr → own tickets only
+      - admin → all tickets
     """
     role = current_user["role"]
-    if role in ("employee", "manager"):
+    if role != "admin":
         return ticket["employee_name"] == current_user["employee_name"]
-    return True  # hr, admin
+    return True  # admin
 
 
-# Roles that have HR-level read/write access to tickets (manager excluded by design)
-STAFF_ROLES = {"hr", "admin"}
+# Roles that have Admin-level read/write access to tickets
+STAFF_ROLES = {"admin"}

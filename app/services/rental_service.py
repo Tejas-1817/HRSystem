@@ -12,13 +12,13 @@ MONTH_NAMES = {
     9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'
 }
 
-def _compute_month_status(month_num: int, year: int, rental_start, rental_end) -> str:
+def _compute_month_status(month_num: int, year: int, rental_start, rental_end, next_due_date=None) -> str:
     """
     Compute status for a given month/year cell:
     - Not Applicable: month is outside rental period
-    - Paid: month is within rental period and in the past
-    - Due This Month: month is within rental period and is the current month
-    - Upcoming: month is within rental period and in the future
+    - Paid: month has already been settled (before next_due_date month/year)
+    - Due This Month: month is the month of next_due_date
+    - Upcoming: month is in the future relative to next_due_date
     """
     today = date.today()
     # First day of the target month
@@ -42,6 +42,11 @@ def _compute_month_status(month_num: int, year: int, rental_start, rental_end) -
             rental_end = date.fromisoformat(rental_end)
         except Exception:
             rental_end = None
+    if isinstance(next_due_date, str):
+        try:
+            next_due_date = date.fromisoformat(next_due_date)
+        except Exception:
+            next_due_date = None
 
     # Check if month overlaps with rental period
     period_start = rental_start if rental_start else date.min
@@ -51,16 +56,22 @@ def _compute_month_status(month_num: int, year: int, rental_start, rental_end) -
     if month_end < period_start or month_start > period_end:
         return 'Not Applicable'
 
-    # Current month
-    if month_num == today.month and year == today.year:
-        return 'Due This Month'
+    if not next_due_date:
+        # Fallback to current month logic if next_due_date is missing
+        if month_num == today.month and year == today.year:
+            return 'Due This Month'
+        if month_start < date(today.year, today.month, 1):
+            return 'Paid'
+        return 'Upcoming'
 
-    # Past month within rental period
-    if month_start < date(today.year, today.month, 1):
+    due_base = date(next_due_date.year, next_due_date.month, 1)
+    
+    if month_start < due_base:
         return 'Paid'
-
-    # Future month within rental period
-    return 'Upcoming'
+    elif month_start == due_base:
+        return 'Due This Month'
+    else:
+        return 'Upcoming'
 
 
 def _build_base_conditions(filters: dict):
@@ -93,6 +104,8 @@ def _build_base_conditions(filters: dict):
             today_str = date.today().isoformat()
             conditions.append("(d.rental_end_date IS NULL OR d.rental_end_date >= %s)")
             params.append(today_str)
+        if filters.get('upcoming_rentals'):
+            conditions.append("YEAR(d.next_due_date) = YEAR(CURRENT_DATE()) AND MONTH(d.next_due_date) = MONTH(CURRENT_DATE())")
         if filters.get('expiring_soon'):
             from datetime import timedelta
             cutoff = (date.today() + timedelta(days=30)).isoformat()
@@ -136,11 +149,14 @@ def get_rental_matrix(filters: dict = None, page: int = 1, page_size: int = 25, 
         SELECT d.id, d.brand, d.model, d.serial_number, d.asset_id, d.device_type,
                d.vendor_name, d.vendor_contact,
                d.rental_start_date, d.rental_end_date, d.renewal_date,
-               d.rental_cost, d.rental_cost_frequency, d.status,
-               da.employee_name AS assigned_to, e.department AS employee_department
+               d.rental_cost, d.rental_cost_frequency, d.status, d.next_due_date,
+               da.employee_name AS assigned_to, e.department AS employee_department,
+               vi.invoice_number AS vendor_invoice_number,
+               vi.status AS vendor_invoice_status
         FROM devices d
         LEFT JOIN device_assignments da ON d.id = da.device_id AND da.returned_date IS NULL
         LEFT JOIN employee e ON da.employee_name = e.name
+        LEFT JOIN vendor_invoices vi ON d.vendor_name = vi.vendor_name
         {where_clause}
         ORDER BY d.brand ASC, d.model ASC
         {limit_clause}
@@ -149,7 +165,7 @@ def get_rental_matrix(filters: dict = None, page: int = 1, page_size: int = 25, 
     result = []
     for r in rows:
         # Serialize date fields
-        for k in ('rental_start_date', 'rental_end_date', 'renewal_date'):
+        for k in ('rental_start_date', 'rental_end_date', 'renewal_date', 'next_due_date'):
             if r.get(k) and hasattr(r[k], 'isoformat'):
                 r[k] = r[k].isoformat()
 
@@ -159,7 +175,7 @@ def get_rental_matrix(filters: dict = None, page: int = 1, page_size: int = 25, 
 
         months = {}
         for m in MONTH_DISPLAY_ORDER:
-            status = _compute_month_status(m, year, rental_start, rental_end)
+            status = _compute_month_status(m, year, rental_start, rental_end, r.get('next_due_date'))
             months[MONTH_NAMES[m]] = {
                 'amount': monthly_rate if status != 'Not Applicable' else 0,
                 'status': status
@@ -171,8 +187,30 @@ def get_rental_matrix(filters: dict = None, page: int = 1, page_size: int = 25, 
                 continue
 
         r['months'] = months
-        # Compute current month status for Status column
-        r['current_status_label'] = months.get(MONTH_NAMES[date.today().month], {}).get('status', 'Not Applicable')
+        # Compute status label for the row based on next_due_date
+        next_due = r.get('next_due_date')
+        if not next_due:
+            r['current_status_label'] = 'Not Applicable'
+        else:
+            if isinstance(next_due, str):
+                try:
+                    next_due = date.fromisoformat(next_due)
+                except:
+                    pass
+            
+            if isinstance(next_due, date):
+                today = date.today()
+                if next_due < today:
+                    r['current_status_label'] = 'Overdue'
+                elif next_due.year == today.year and next_due.month == today.month:
+                    r['current_status_label'] = 'Due This Month'
+                elif (next_due.year == today.year and next_due.month == today.month + 1) or \
+                     (next_due.year == today.year + 1 and today.month == 12 and next_due.month == 1):
+                    r['current_status_label'] = 'Due Next Month'
+                else:
+                    r['current_status_label'] = 'Upcoming'
+            else:
+                r['current_status_label'] = 'Not Applicable'
         result.append(r)
 
     return {

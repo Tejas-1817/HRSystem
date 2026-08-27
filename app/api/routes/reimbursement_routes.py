@@ -34,7 +34,7 @@ CATEGORY_LABELS = {
 # POST /reimbursements/ — Submit expense claim (+ optional receipt upload)
 # ---------------------------------------------------------------------------
 
-@reimbursement_bp.route("/", methods=["POST"])
+@reimbursement_bp.route("/", methods=["POST"], strict_slashes=False)
 @token_required
 def submit_claim(current_user):
     """
@@ -147,7 +147,7 @@ def submit_claim(current_user):
 # GET /reimbursements/ — List (RBAC scoped + filters)
 # ---------------------------------------------------------------------------
 
-@reimbursement_bp.route("/", methods=["GET"])
+@reimbursement_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def list_reimbursements(current_user):
     """

@@ -25,6 +25,7 @@ def _extract_filters(args):
         "month": args.get("month"),
         "active_only": args.get("active_only") == "true",
         "expiring_soon": args.get("expiring_soon") == "true",
+        "upcoming_rentals": args.get("upcoming_rentals") == "true",
     }
 
 

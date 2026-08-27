@@ -162,7 +162,7 @@ def update_allocation_config(current_user, emp_id):
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
-@employee_bp.route("/", methods=["GET"])
+@employee_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def view_employees(current_user):
     try:
@@ -301,7 +301,7 @@ def get_employee(current_user, emp_id):
         logger.error(f"Error fetching employee {emp_id}: {e}", exc_info=True)
         return jsonify({"success": False, "error": "Failed to fetch employee details"}), 500
 
-@employee_bp.route("/", methods=["POST"])
+@employee_bp.route("/", methods=["POST"], strict_slashes=False)
 @role_required(["hr"])
 def add_employee(current_user):
     try:
@@ -352,24 +352,11 @@ def add_employee(current_user):
         logger.error(f"Error adding employee: {str(e)}", exc_info=True)
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
-@employee_bp.route("/<int:emp_id>", methods=["PUT"])
-@role_required(["hr"])
+@employee_bp.route("/<int:emp_id>", methods=["PUT", "PATCH"])
+@role_required(["hr", "admin", "superadmin"])
 def update_employee(current_user, emp_id):
     """
-    HR-only: Update an existing employee's details.
-
-    Accepts JSON body with any subset of editable fields:
-    {
-      "name":            "Kartik D",        // display name
-      "phone":           "9876543210",
-      "salary":          75000,
-      "date_of_birth":   "1995-06-15",      // YYYY-MM-DD
-      "date_of_joining": "2022-01-10",      // YYYY-MM-DD
-      "status":          "working"          // working | bench | over_allocated
-    }
-
-    Fields NOT accepted (managed separately):
-      email, photo, pdf_file, docx_file — handled by dedicated upload endpoints.
+    Update an existing employee's details.
     """
     try:
         data = request.get_json(silent=True) or {}
@@ -383,9 +370,10 @@ def update_employee(current_user, emp_id):
 
         # ── 2. Build update query from only the fields provided ───────────
         ALLOWED_FIELDS = {
-            "name", "phone", "salary",
+            "name", "phone", "salary", "role",
             "date_of_birth", "date_of_joining", "status", "email",
             "designation", "department", "gender", "address", "employment_type",
+            "reporting_manager",
         }
 
         VALID_STATUSES = {"working", "bench", "over_allocated"}
@@ -548,6 +536,16 @@ def update_employee(current_user, emp_id):
                                "Please try again or contact support."
                 }), 500
 
+        # Sync users table role if role was updated
+        if "role" in updates and updates["role"]:
+            try:
+                execute_query("""
+                    UPDATE users SET role = %s 
+                    WHERE employee_id = %s OR employee_name = %s
+                """, (updates["role"], emp_id, existing["name"]), commit=True)
+            except Exception as role_sync_err:
+                logger.warning(f"Failed to sync users.role for emp {emp_id}: {role_sync_err}")
+
         # ── 6. Audit log ───────────────────────────────────────────────────
         changed_fields = ", ".join(updates.keys())
         execute_query(
@@ -621,12 +619,12 @@ def delete_employee(current_user, emp_id):
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
-@employee_bp.route("/<int:emp_id>/role", methods=["PUT"])
-@role_required(["admin"])
+@employee_bp.route("/<int:emp_id>/role", methods=["PUT", "PATCH"])
+@role_required(["admin", "superadmin", "hr"])
 def change_employee_role(current_user, emp_id):
     """
-    Admin-only: Update an employee's role.
-    This triggers a cascade rename across the entire system.
+    Update an employee/team member's role.
+    This triggers a role update across users and employee tables.
     """
     try:
         data = request.get_json() or {}
@@ -635,19 +633,28 @@ def change_employee_role(current_user, emp_id):
         if not new_role:
             return jsonify({"success": False, "error": "New role is required"}), 400
 
-        # Note: employee_id in routes is often the database ID of the employee table.
-        # But update_employee_role takes the user_id.
-        # Let's find the user_id for this employee.
+        # Find the user record for this employee
         user = execute_single("""
             SELECT u.id FROM users u
-            JOIN employee e ON u.employee_name = e.name
-            WHERE e.id = %s
-        """, (emp_id,))
+            WHERE u.employee_id = %s OR u.employee_name = (SELECT name FROM employee WHERE id = %s)
+        """, (emp_id, emp_id))
         
         if not user:
-            return jsonify({"success": False, "error": "User account for this employee not found"}), 404
+            # Fallback: check by employee name directly
+            user = execute_single("""
+                SELECT u.id FROM users u
+                JOIN employee e ON u.employee_name = e.name
+                WHERE e.id = %s
+            """, (emp_id,))
+
+        if not user:
+            # Direct update in employee table if user account not found
+            execute_query("UPDATE employee SET role = %s WHERE id = %s", (new_role, emp_id), commit=True)
+            return jsonify({"success": True, "message": f"Role updated to {new_role}", "data": {"new_role": new_role}}), 200
 
         result = update_employee_role(current_user["user_id"], user["id"], new_role)
+        # Also ensure employee table role column is in sync
+        execute_query("UPDATE employee SET role = %s WHERE id = %s", (new_role, emp_id), commit=True)
         return jsonify(result), 200
 
     except ValueError as e:

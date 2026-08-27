@@ -199,7 +199,7 @@ def _can_view_leave(current_user: dict, leave_row: dict) -> bool:
 # GET /leaves/ — list leave applications
 # ---------------------------------------------------------------------------
 
-@leave_bp.route("/", methods=["GET"])
+@leave_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def view_leaves(current_user):
     try:
@@ -699,7 +699,7 @@ def leave_calendar(current_user):
 # POST /leaves/ — apply for leave (full-day or half-day)
 # ---------------------------------------------------------------------------
 
-@leave_bp.route("/", methods=["POST"])
+@leave_bp.route("/", methods=["POST"], strict_slashes=False)
 @leave_bp.route("/apply", methods=["POST"])
 @token_required
 def apply_leave(current_user):

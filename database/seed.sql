@@ -66,24 +66,22 @@ INSERT IGNORE INTO payslips (employee_name, month, year, file_path) VALUES
 ('T_Kartik', 'March', 2026, 'uploads/kartik_payslip_march.pdf'),
 ('T_Sneha', 'March', 2026, 'uploads/sneha_payslip_march.pdf');
 
--- 🔥 Seed Holidays (public, company, optional for 2026)
+-- 🔥 Seed Holidays (public, optional for 2026)
 INSERT IGNORE INTO holidays (name, date, type, description) VALUES
-('New Year''s Day',        '2026-01-01', 'public',   'New Year celebration'),
-('Republic Day',           '2026-01-26', 'public',   'Indian Republic Day'),
-('Holi',                   '2026-03-17', 'public',   'Festival of Colors'),
-('Good Friday',            '2026-04-03', 'public',   'Christian observance'),
-('Eid al-Fitr',            '2026-04-10', 'public',   'End of Ramadan'),
-('May Day',                '2026-05-01', 'public',   'International Workers Day'),
-('Independence Day',       '2026-08-15', 'public',   'Indian Independence Day'),
-('Ganesh Chaturthi',       '2026-08-27', 'public',   'Lord Ganesha festival'),
-('Gandhi Jayanti',         '2026-10-02', 'public',   'Mahatma Gandhi birthday'),
-('Dussehra',               '2026-10-12', 'public',   'Victory of good over evil'),
-('Diwali',                 '2026-11-05', 'public',   'Festival of Lights'),
-('Christmas',              '2026-12-25', 'public',   'Christmas Day'),
-('Company Foundation Day', '2026-06-15', 'company',  'Anniversary of company founding'),
-('Annual Day',             '2026-09-20', 'company',  'Company annual gathering'),
-('Birthday Leave',         '2026-01-01', 'optional', 'Employees may take their birthday off'),
-('Voting Day',             '2026-04-20', 'optional', 'Election day — optional leave');
+('New Years',                 '2026-01-01', 'optional', 'New Years'),
+('Makara Sankranthi',        '2026-01-15', 'optional', 'Makara Sankranthi'),
+('Republic Day',              '2026-01-26', 'public',   'Republic Day'),
+('Holi',                      '2026-03-03', 'optional', 'Holi'),
+('Ugadi/Gudi Padwa',          '2026-03-19', 'optional', 'Ugadi/Gudi Padwa'),
+('Good Friday',               '2026-04-03', 'optional', 'Good Friday'),
+('May Day & Maharashtra Day', '2026-05-01', 'public',   'May Day & Maharashtra Day'),
+('Bakrid',                    '2026-05-28', 'public',   'Bakrid'),
+('Independence Day',          '2026-08-15', 'public',   'Independence Day'),
+('Ganesh Chaturthi',          '2026-09-14', 'public',   'Ganesh Chaturthi'),
+('Gandhi Jayanti',            '2026-10-02', 'public',   'Gandhi Jayanti'),
+('Dasara',                    '2026-10-20', 'optional', 'Dasara'),
+('Diwali',                    '2026-11-09', 'public',   'Diwali'),
+('Christmas',                 '2026-12-25', 'public',   'Christmas');
 
 -- 🔥 Seed Employee Documents (with access control: is_confidential = TRUE for all sensitive docs)
 INSERT IGNORE INTO employee_documents (employee_name, doc_type, file_path, status, is_confidential, verified_by, verified_at) VALUES

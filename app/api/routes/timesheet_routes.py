@@ -98,20 +98,59 @@ def _get_day_max_hours(employee_name: str, date_str: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# GET /timesheets/managers — list all active managers for dropdown
+# ---------------------------------------------------------------------------
+
+@timesheet_bp.route("/managers", methods=["GET"])
+@token_required
+def get_timesheet_managers(current_user):
+    """Fetch all managers from team member (employee) records for timesheet assignment dropdown."""
+    try:
+        rows = execute_query("""
+            SELECT 
+                e.id, 
+                e.name as employee_name, 
+                e.name,
+                COALESCE(u.role, 'manager') as role,
+                e.designation,
+                e.department
+            FROM employee e
+            LEFT JOIN users u ON e.name = u.employee_name
+            WHERE u.role = 'manager' 
+               OR e.name LIKE 'M_%'
+               OR (u.role IS NULL AND (e.designation LIKE '%Manager%' OR LOWER(e.designation) = 'pm'))
+            ORDER BY e.name ASC
+        """)
+        return jsonify({"success": True, "managers": rows}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
 # GET /timesheets/ — list (manager/HR see all; employee sees own)
 # ---------------------------------------------------------------------------
 
-@timesheet_bp.route("/", methods=["GET"])
+@timesheet_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def view_timesheets(current_user):
     try:
-        if current_user["role"] in ("manager", "hr"):
+        if current_user["role"] in ("admin", "hr"):
             rows = execute_query("""
                 SELECT t.*, p.project_id
                 FROM timesheets t
                 LEFT JOIN projects p ON t.project = p.name
                 ORDER BY t.start_date DESC
             """)
+        elif current_user["role"] == "manager":
+            rows = execute_query("""
+                SELECT t.*, p.project_id
+                FROM timesheets t
+                LEFT JOIN projects p ON t.project = p.name
+                WHERE t.employee_name = %s
+                   OR t.manager_name = %s
+                   OR p.manager_name = %s
+                ORDER BY t.start_date DESC
+            """, (current_user["employee_name"], current_user["employee_name"], current_user["employee_name"]))
         else:
             rows = execute_query("""
                 SELECT t.*, p.project_id
@@ -391,7 +430,7 @@ def get_timesheet_for_day(current_user):
 # POST /timesheets/ — submit a new timesheet entry
 # ---------------------------------------------------------------------------
 
-@timesheet_bp.route("/", methods=["POST"])
+@timesheet_bp.route("/", methods=["POST"], strict_slashes=False)
 @token_required
 def add_timesheet(current_user):
     try:
@@ -452,12 +491,17 @@ def add_timesheet(current_user):
 
         # Auto-populate owner_role from the submitter's current role
         owner_role = current_user["role"]
+        manager_name = data.get("manager_name") or data.get("assigned_manager")
+        if not manager_name and data.get("project"):
+            proj = execute_single("SELECT manager_name FROM projects WHERE name = %s", (data["project"],))
+            if proj:
+                manager_name = proj.get("manager_name")
 
         new_id = execute_query("""
-            INSERT INTO timesheets (employee_name, owner_role, project, task, description, hours, start_date, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'submitted')
+            INSERT INTO timesheets (employee_name, owner_role, project, task, description, hours, start_date, manager_name, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'submitted')
         """, (emp_name, owner_role, data["project"], data["task"],
-              data.get("description", ""), hours_val, date_str),
+              data.get("description", ""), hours_val, date_str, manager_name),
              commit=True)
 
         # Log submission event in approval history
@@ -465,7 +509,7 @@ def add_timesheet(current_user):
             log_submission_event(new_id, emp_name, owner_role, is_resubmit=False)
 
         # Notify the appropriate approver
-        notify_submission(emp_name, owner_role, new_id, data["project"], date_str)
+        notify_submission(emp_name, owner_role, new_id, data["project"], date_str, manager_name=manager_name)
 
         return jsonify({"success": True, "message": "Timesheet entry submitted successfully", "entry_id": new_id}), 201
     except Exception as e:
@@ -593,10 +637,12 @@ def update_timesheet(current_user, entry_id):
             import logging
             logging.getLogger(__name__).warning(f"Failed to log edit history for timesheet {entry_id}: {log_e}")
 
+        new_manager = data.get("manager_name") or row.get("manager_name")
+
         execute_query("""
             UPDATE timesheets
             SET project = %s, task = %s, description = %s, hours = %s,
-                start_date = %s, status = 'submitted', manager_comments = NULL,
+                start_date = %s, manager_name = %s, status = 'submitted', manager_comments = NULL,
                 rejection_reason = NULL, approved_by = NULL, approver_role = NULL, approved_at = NULL
             WHERE id = %s
         """, (new_project,
@@ -604,12 +650,13 @@ def update_timesheet(current_user, entry_id):
               new_description,
               hours_to_use,
               target_date,
+              new_manager,
               entry_id), commit=True)
 
         # Log resubmission event and notify approver
         if was_rejected:
             log_submission_event(entry_id, emp_name, current_user["role"], is_resubmit=True)
-            notify_submission(emp_name, current_user["role"], entry_id, new_project, target_date)
+            notify_submission(emp_name, current_user["role"], entry_id, new_project, target_date, manager_name=new_manager)
 
         return jsonify({"success": True, "message": "Timesheet entry updated"}), 200
     except Exception as e:
@@ -700,10 +747,10 @@ def review_timesheet(current_user, entry_id):
 
 
 # ---------------------------------------------------------------------------
-# PUT /timesheets/<id>/approve — convenience wrapper (RBAC in service)
+# PUT & POST /timesheets/<id>/approve — convenience wrapper (RBAC in service)
 # ---------------------------------------------------------------------------
 
-@timesheet_bp.route("/<int:entry_id>/approve", methods=["PUT"])
+@timesheet_bp.route("/<int:entry_id>/approve", methods=["PUT", "POST"])
 @token_required
 def approve_timesheet(current_user, entry_id):
     """Approve a pending timesheet entry. RBAC enforced by service layer."""
@@ -719,10 +766,10 @@ def approve_timesheet(current_user, entry_id):
 
 
 # ---------------------------------------------------------------------------
-# PUT /timesheets/<id>/reject — convenience wrapper (RBAC in service)
+# PUT & POST /timesheets/<id>/reject — convenience wrapper (RBAC in service)
 # ---------------------------------------------------------------------------
 
-@timesheet_bp.route("/<int:entry_id>/reject", methods=["PUT"])
+@timesheet_bp.route("/<int:entry_id>/reject", methods=["PUT", "POST"])
 @token_required
 def reject_timesheet(current_user, entry_id):
     """Reject a timesheet entry. RBAC enforced by service layer."""
@@ -790,6 +837,7 @@ def pending_approvals(current_user):
         return jsonify({
             "success": True,
             "pending": pending,
+            "pending_approvals": pending,
             "count": len(pending),
         }), 200
     except Exception as e:

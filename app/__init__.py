@@ -85,8 +85,10 @@ def create_app():
     from app.api.routes.department_routes import department_bp
     from app.api.routes.superadmin_routes import superadmin_bp
     from app.api.routes.rental_routes import rental_bp
+    from app.api.routes.rental_invoice_routes import rental_invoice_bp
     from app.onboarding import onboarding_bp
     from app.offboarding.routes import offboarding_bp
+    from app.api.routes.software_routes import software_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(employee_bp, url_prefix='/employees')
@@ -108,8 +110,10 @@ def create_app():
     app.register_blueprint(announcement_bp, url_prefix='/announcements')
     app.register_blueprint(superadmin_bp) # Routes like /admin/permissions
     app.register_blueprint(rental_bp, url_prefix='/rentals')
+    app.register_blueprint(rental_invoice_bp, url_prefix='/rentals')
     app.register_blueprint(onboarding_bp, url_prefix='/onboarding')
     app.register_blueprint(offboarding_bp, url_prefix='/offboarding')
+    app.register_blueprint(software_bp, url_prefix='/software')
 
     @app.after_request
     def add_security_headers(response):
@@ -133,6 +137,25 @@ def create_app():
     @app.route("/")
     def home():
         return {"success": True, "message": "Welcome to the Modular HR Management API"}
+
+    # Initialize rental tables
+    try:
+        from app.models.database import (
+            initialize_rental_invoice_tables,
+            initialize_reimbursement_tables,
+            initialize_holiday_tables,
+            initialize_software_tables
+        )
+        initialize_rental_invoice_tables()
+        initialize_reimbursement_tables()
+        initialize_holiday_tables()
+        initialize_software_tables()
+        
+        # Start background scheduler for rental invoices
+        from app.services.rental_scheduler import start_rental_scheduler
+        start_rental_scheduler(app)
+    except Exception as init_err:
+        app.logger.error(f"Failed to initialize database tables or schedulers: {init_err}")
 
     return app
 

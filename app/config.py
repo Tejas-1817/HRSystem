@@ -7,7 +7,7 @@ class Config:
     DB_HOST = os.getenv("DB_HOST", "localhost")
     DB_NAME = os.getenv("DB_NAME", "starterdata")
     DB_USER = os.getenv("DB_USER", "tejas")
-    DB_PASS = os.getenv("DB_PASS", "password123")
+    DB_PASS = os.getenv("DB_PASS", "NewPassword@123")
     JWT_SECRET = os.getenv("JWT_SECRET", "default-secret-key")
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
     DEBUG = os.getenv("DEBUG", "True").lower() == "true"

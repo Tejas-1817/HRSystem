@@ -48,13 +48,18 @@ def validate_approval_authority(approver: dict, timesheet: dict) -> tuple[bool, 
     if approver_role == "admin":
         return True, ""
 
-    # ── 4. Manager: can only approve employee timesheets on their projects ─
+    # ── 4. Manager: can approve employee timesheets assigned to them or on their projects ─
     if approver_role == "manager":
         if owner_role in ("hr", "manager", "admin"):
             return False, (
                 f"Managers cannot approve {owner_role.upper()} timesheets. "
                 f"Only Admin can approve timesheets for {owner_role.upper()} employees."
             )
+        # Check if this manager is directly assigned to the timesheet entry
+        assigned_mgr = timesheet.get("manager_name")
+        if assigned_mgr and assigned_mgr == approver_name:
+            return True, ""
+
         # Verify manager owns the project referenced in this timesheet entry
         project_name = timesheet.get("project")
         if project_name:
@@ -62,12 +67,17 @@ def validate_approval_authority(approver: dict, timesheet: dict) -> tuple[bool, 
                 "SELECT id FROM projects WHERE name = %s AND manager_name = %s",
                 (project_name, approver_name)
             )
-            if not is_project_manager:
-                return False, (
-                    f"You are not the manager of project '{project_name}'. "
-                    f"Only the assigned project manager can approve this timesheet."
-                )
-        return True, ""
+            if is_project_manager:
+                return True, ""
+
+        if assigned_mgr:
+            return False, (
+                f"This timesheet is assigned to manager '{assigned_mgr}'. "
+                f"Only the assigned manager or project manager can approve this timesheet."
+            )
+        return False, (
+            f"You are not the assigned manager or project manager for project '{project_name}'."
+        )
 
     # ── 5. HR: cannot approve employee timesheets ─────────────────────────
     if approver_role == "hr":
@@ -297,7 +307,7 @@ def get_pending_approvals(approver: dict) -> list[dict]:
     """
     Return timesheets that are pending the given approver's review,
     filtered by the RBAC rules:
-      - Manager: submitted/pending employee timesheets on their projects
+      - Manager: submitted/pending employee timesheets assigned to them or on their projects
       - Admin:   submitted/pending HR and Manager timesheets (+ everything)
     """
     approver_role = approver["role"]
@@ -313,17 +323,18 @@ def get_pending_approvals(approver: dict) -> list[dict]:
             ORDER BY t.submitted_at DESC
         """)
     elif approver_role == "manager":
-        # Manager sees pending timesheets only for employees on their projects
+        # Manager sees pending timesheets assigned to them OR for employees on their projects
         rows = execute_query("""
             SELECT t.*, u.role as owner_role_live
             FROM timesheets t
             LEFT JOIN users u ON t.employee_name = u.employee_name
-            INNER JOIN projects p ON t.project = p.name AND p.manager_name = %s
+            LEFT JOIN projects p ON t.project = p.name
             WHERE t.status IN ('submitted', 'pending')
               AND (u.role = 'employee' OR t.owner_role = 'employee')
               AND t.employee_name != %s
+              AND (t.manager_name = %s OR (t.manager_name IS NULL AND p.manager_name = %s))
             ORDER BY t.submitted_at DESC
-        """, (approver_name, approver_name))
+        """, (approver_name, approver_name, approver_name))
     else:
         # HR and employees: no pending approvals queue
         return []
@@ -340,28 +351,35 @@ def get_pending_approvals(approver: dict) -> list[dict]:
 # Submission Notification
 # ─────────────────────────────────────────────────────────────────────────────
 
-def notify_submission(employee_name: str, employee_role: str, timesheet_id: int, project_name: str, date_str: str):
+def notify_submission(employee_name: str, employee_role: str, timesheet_id: int, project_name: str, date_str: str, manager_name: str = None):
     """
     Send notification to the appropriate approver when a timesheet is submitted.
-      - Employee  → notify the project manager
+      - Employee  → notify the assigned manager (or project manager if not specified)
       - HR/Manager → notify admin(s)
     """
     if employee_role == "employee":
-        # Find the project manager
-        if project_name:
+        target_manager = manager_name
+        if not target_manager and timesheet_id:
+            ts_row = execute_single("SELECT manager_name FROM timesheets WHERE id = %s", (timesheet_id,))
+            if ts_row:
+                target_manager = ts_row.get("manager_name")
+        if not target_manager and project_name:
             proj = execute_single(
                 "SELECT manager_name FROM projects WHERE name = %s", (project_name,)
             )
-            if proj and proj["manager_name"]:
-                _notify(
-                    recipient=proj["manager_name"],
-                    title="Timesheet Pending Approval",
-                    message=(
-                        f"{employee_name} has submitted a timesheet entry for project "
-                        f"'{project_name}' on {date_str}. Please review and approve/reject."
-                    ),
-                    notif_type="timesheet_pending",
-                )
+            if proj and proj.get("manager_name"):
+                target_manager = proj["manager_name"]
+
+        if target_manager:
+            _notify(
+                recipient=target_manager,
+                title="Timesheet Pending Approval",
+                message=(
+                    f"{employee_name} has submitted a timesheet entry for project "
+                    f"'{project_name}' on {date_str}. Please review and approve/reject."
+                ),
+                notif_type="timesheet_pending",
+            )
     elif employee_role in ("hr", "manager"):
         # Notify all admin users
         admins = execute_query("SELECT employee_name FROM users WHERE role = 'admin' AND is_active = TRUE")
