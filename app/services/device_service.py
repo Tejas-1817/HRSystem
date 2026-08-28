@@ -180,12 +180,30 @@ def create_device(data: dict) -> int:
         vendor_name = vendor_contact = rental_start_date = None
         rental_end_date = rental_cost = rental_cost_frequency = None
 
+    # Calculate Next Due Date
+    next_due_date = None
+    if ownership_type == "Rented" and rental_start_date:
+        try:
+            from datetime import datetime, date
+            import calendar
+            if isinstance(rental_start_date, str):
+                start_dt = datetime.strptime(rental_start_date, "%Y-%m-%d").date()
+            elif hasattr(rental_start_date, "year"):
+                start_dt = rental_start_date
+            else:
+                start_dt = None
+            if start_dt:
+                next_due_date = start_dt.isoformat()
+        except Exception as e:
+            logger.warning(f"Failed to calculate next_due_date: {e}")
+
     device_id = execute_query("""
         INSERT INTO devices (brand, model, serial_number, asset_id, status, device_type,
                              catalog_id, purchase_date, warranty_expiry, condition_notes, location,
                              processor, ram, storage, ownership_type, vendor_name, vendor_contact,
-                             rental_start_date, rental_end_date, rental_cost, rental_cost_frequency)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             rental_start_date, rental_end_date, rental_cost, rental_cost_frequency,
+                             next_due_date)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         data["brand"], data["model"], data["serial_number"], data.get("asset_id"),
         data.get("status", "Available"), data.get("device_type", "Laptop"),
@@ -194,12 +212,32 @@ def create_device(data: dict) -> int:
         data.get("processor"), data.get("ram"), data.get("storage"),
         ownership_type, vendor_name, vendor_contact,
         rental_start_date, rental_end_date, rental_cost, rental_cost_frequency,
+        next_due_date,
     ), commit=True)
 
     # Log stock event
     note_suffix = f" ({ownership_type}{' via ' + vendor_name if vendor_name else ''})"
     _log_stock(device_id, catalog_id, "added", data.get("added_by", "system"),
                new_status="Available", notes=f"New device added: {data['brand']} {data['model']}{note_suffix}")
+
+    if ownership_type == "Rented":
+        # 1. Check/create vendor invoice
+        existing_vendor_inv = execute_single("SELECT invoice_number FROM vendor_invoices WHERE vendor_name = %s", (vendor_name,))
+        if not existing_vendor_inv:
+            today = date.today()
+            year_val = today.year
+            cnt = execute_single("SELECT COUNT(*) AS count FROM vendor_invoices WHERE invoice_number LIKE %s", (f"INV-{year_val}-%",))
+            seq = (cnt['count'] if cnt else 0) + 1
+            invoice_num = f"INV-{year_val}-{seq:04d}"
+            try:
+                execute_query("INSERT INTO vendor_invoices (vendor_name, invoice_number, status) VALUES (%s, %s, 'Pending')", (vendor_name, invoice_num), commit=True)
+            except Exception as e:
+                logger.error(f"Failed to auto-create vendor_invoice: {e}")
+        try:
+            from app.services.rental_invoice_service import check_and_generate_invoices
+            check_and_generate_invoices()
+        except Exception as e:
+            logger.error(f"Failed to auto-check invoices on device creation: {e}")
 
     return device_id
 
@@ -636,8 +674,27 @@ def update_device_enterprise(
         "rental_cost": "Rental Cost",
         "rental_cost_frequency": "Rental Cost Frequency",
         "purchase_date": "Purchase Date",
-        "warranty_expiry": "Warranty Expiry"
+        "warranty_expiry": "Warranty Expiry",
+        "next_due_date": "Next Due Date"
     }
+
+    # Automatically calculate next_due_date if rental_start_date changed
+    if "rental_start_date" in update_data and update_data.get("ownership_type", device.get("ownership_type")) == "Rented":
+        new_start = update_data["rental_start_date"]
+        if new_start != device.get("rental_start_date") and "next_due_date" not in update_data:
+            try:
+                from datetime import datetime, date
+                import calendar
+                if isinstance(new_start, str):
+                    start_dt = datetime.strptime(new_start, "%Y-%m-%d").date()
+                elif hasattr(new_start, "year"):
+                    start_dt = new_start
+                else:
+                    start_dt = None
+                if start_dt:
+                    update_data["next_due_date"] = start_dt.isoformat()
+            except Exception as e:
+                logger.warning(f"Failed to calculate next_due_date on update: {e}")
 
     # 3. Status Transition Rules
     new_status = update_data.get("status")
@@ -782,6 +839,13 @@ def update_device_enterprise(
                 new_status=new_status,
                 notes=f"Status manually updated during edit"
             )
+
+    if update_data.get("ownership_type") == "Rented" or device.get("ownership_type") == "Rented":
+        try:
+            from app.services.rental_invoice_service import check_and_generate_invoices
+            check_and_generate_invoices()
+        except Exception as e:
+            logger.error(f"Failed to auto-check invoices on device update: {e}")
 
     return {
         "device_id": device_id,

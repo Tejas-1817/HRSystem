@@ -4,7 +4,7 @@ from app.api.middleware.auth import token_required
 
 notification_bp = Blueprint('notifications', __name__)
 
-@notification_bp.route("/", methods=["GET"])
+@notification_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def get_notifications(current_user):
     """Fetch all notifications for the logged-in employee."""

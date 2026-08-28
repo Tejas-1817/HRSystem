@@ -20,7 +20,7 @@ announcement_bp = Blueprint("announcements", __name__)
 # POST /announcements/ — Create (HR / Admin only)
 # ---------------------------------------------------------------------------
 
-@announcement_bp.route("/", methods=["POST"])
+@announcement_bp.route("/", methods=["POST"], strict_slashes=False)
 @role_required(["hr"])
 def create_announcement(current_user):
     """
@@ -112,7 +112,7 @@ def create_announcement(current_user):
 # GET /announcements/ — List (RBAC scoped with Pagination)
 # ---------------------------------------------------------------------------
 
-@announcement_bp.route("/", methods=["GET"])
+@announcement_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def list_announcements(current_user):
     """

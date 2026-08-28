@@ -38,7 +38,7 @@ CATEGORY_LABELS = {
 # POST /helpdesk/ — Create a new ticket
 # ---------------------------------------------------------------------------
 
-@helpdesk_bp.route("/", methods=["POST"])
+@helpdesk_bp.route("/", methods=["POST"], strict_slashes=False)
 @token_required
 def create_ticket(current_user):
     """
@@ -99,11 +99,15 @@ def create_ticket(current_user):
 
         ticket_ref = generate_ticket_ref()
 
+        # Default assigned_to to Admin ("Kalyani") upon ticket creation
+        admin_row = execute_single("SELECT employee_name FROM users WHERE role = 'admin' AND (employee_name LIKE '%%Kalyani%%' OR employee_name = 'Kalyani') LIMIT 1")
+        default_admin = admin_row["employee_name"] if admin_row else "Kalyani"
+
         execute_query("""
             INSERT INTO helpdesk_tickets
-                (ticket_ref, title, description, category, priority, status, employee_name, device_id, issue_type)
-            VALUES (%s, %s, %s, %s, %s, 'open', %s, %s, %s)
-        """, (ticket_ref, title, description, category, priority, employee_name, device_id, issue_type),
+                (ticket_ref, title, description, category, priority, status, employee_name, assigned_to, device_id, issue_type)
+            VALUES (%s, %s, %s, %s, %s, 'open', %s, %s, %s, %s)
+        """, (ticket_ref, title, description, category, priority, employee_name, default_admin, device_id, issue_type),
              commit=True)
 
         ticket = execute_single(
@@ -137,7 +141,7 @@ def create_ticket(current_user):
 # GET /helpdesk/ — List tickets (RBAC scoped + filters)
 # ---------------------------------------------------------------------------
 
-@helpdesk_bp.route("/", methods=["GET"])
+@helpdesk_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def list_tickets(current_user):
     """
@@ -177,7 +181,7 @@ def list_tickets(current_user):
 # ---------------------------------------------------------------------------
 
 @helpdesk_bp.route("/stats", methods=["GET"])
-@role_required(["hr"])
+@role_required(["admin"])
 def ticket_stats(current_user):
     """
     Returns aggregate counts for the Help Desk dashboard.
@@ -274,7 +278,7 @@ def get_ticket(current_user, ticket_id):
 # ---------------------------------------------------------------------------
 
 @helpdesk_bp.route("/<int:ticket_id>/history", methods=["GET"])
-@role_required(["hr"])
+@role_required(["admin"])
 def get_ticket_history_route(current_user, ticket_id):
     """Returns the full immutable audit trail for a ticket."""
     try:
@@ -300,7 +304,7 @@ def get_ticket_history_route(current_user, ticket_id):
 # ---------------------------------------------------------------------------
 
 @helpdesk_bp.route("/<int:ticket_id>/status", methods=["PATCH"])
-@role_required(["hr"])
+@role_required(["admin"])
 def update_status(current_user, ticket_id):
     """
     Update a ticket's status. Auto-sets resolved_at when status = 'resolved'.
@@ -361,7 +365,7 @@ def update_status(current_user, ticket_id):
 # ---------------------------------------------------------------------------
 
 @helpdesk_bp.route("/<int:ticket_id>/assign", methods=["PATCH"])
-@role_required(["hr"])
+@role_required(["admin"])
 def assign_ticket(current_user, ticket_id):
     """
     Assign a ticket to a resolver (HR/support staff).

@@ -79,7 +79,7 @@ def _derive_attendance_rows(current_user):
     return derived
 
 
-@attendance_bp.route("/", methods=["GET"])
+@attendance_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def get_attendance(current_user):
     """

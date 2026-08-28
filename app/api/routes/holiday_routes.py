@@ -1,10 +1,26 @@
 from flask import Blueprint, request, jsonify
 from app.models.database import execute_query, execute_single
 from app.api.middleware.auth import token_required, role_required
+import datetime
 
 holiday_bp = Blueprint('holidays', __name__)
 
-@holiday_bp.route("/", methods=["GET"])
+
+def _serialize_rows(rows):
+    """Convert any datetime.date fields in each row to ISO-format strings.
+    
+    MySQL's DATE column returns datetime.date objects. Flask's jsonify
+    serialises those as HTTP-date strings ("Thu, 01 Jan 2026 00:00:00 GMT")
+    instead of ISO format ("2026-01-01"), which breaks frontend date parsing.
+    """
+    for row in rows:
+        for key, val in row.items():
+            if isinstance(val, (datetime.date, datetime.datetime)):
+                row[key] = val.isoformat()[:10]  # always "YYYY-MM-DD"
+    return rows
+
+
+@holiday_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def get_holidays(current_user):
     """Fetch all holidays, with optional filtering by type."""
@@ -14,7 +30,9 @@ def get_holidays(current_user):
             rows = execute_query("SELECT * FROM holidays WHERE type=%s ORDER BY date", (holiday_type,))
         else:
             rows = execute_query("SELECT * FROM holidays ORDER BY date")
-            
+
+        _serialize_rows(rows)
+
         return jsonify({
             "success": True, 
             "count": len(rows),
@@ -23,7 +41,7 @@ def get_holidays(current_user):
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
-@holiday_bp.route("/", methods=["POST"])
+@holiday_bp.route("/", methods=["POST"], strict_slashes=False)
 @role_required(["hr"])
 def add_holiday(current_user):
     """Add a new holiday (HR only)."""
@@ -58,6 +76,7 @@ def holiday_dashboard(current_user):
             SELECT * FROM holidays 
             WHERE MONTH(date) = MONTH(CURDATE()) AND DAY(date) = DAY(CURDATE())
         """)
+        _serialize_rows(today_holidays)
         
         # Upcoming holidays (next 30 days)
         upcoming = execute_query("""
@@ -66,6 +85,7 @@ def holiday_dashboard(current_user):
             WHERE date > CURDATE() AND date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
             ORDER BY date ASC
         """)
+        _serialize_rows(upcoming)
         
         return jsonify({
             "success": True,

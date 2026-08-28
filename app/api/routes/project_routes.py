@@ -106,7 +106,7 @@ def get_employee_projects(current_user, employee_name):
         return jsonify({"success": False, "error": "Failed to fetch employee projects"}), 500
 
 
-@project_bp.route("/", methods=["GET"])
+@project_bp.route("/", methods=["GET"], strict_slashes=False)
 @token_required
 def view_projects(current_user):
     """
@@ -259,7 +259,7 @@ def get_project(current_user, project_id):
         return jsonify({"success": False, "error": "Failed to fetch project details"}), 500
 
 
-@project_bp.route("/", methods=["POST"])
+@project_bp.route("/", methods=["POST"], strict_slashes=False)
 @role_required(["hr"])
 def add_project(current_user):
     """Create a new project (HR only)."""
