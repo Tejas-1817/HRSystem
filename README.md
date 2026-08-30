@@ -195,6 +195,53 @@ The backend has been refactored to use "**Team Member**" instead of "**Employee*
 
 ---
 
+## ⏱️ Background Schedulers & Production Deployment
+
+To prevent duplicate execution across multiple Gunicorn workers (`--workers 3`), background schedulers do not run inside the Flask API workers. Instead, all background jobs are managed by a dedicated, standalone scheduler process: `scheduler.py`.
+
+### Scheduled Tasks:
+1. **Rental Invoice Generation**: Checks active rental assets and auto-generates invoices due in $\le 7$ days every 6 hours (with initial check on startup).
+2. **Leave Credit Sweep**: Evaluates quarterly leave milestones and auto-credits leaves daily at 01:00 AM.
+
+### Local / Manual Execution:
+```bash
+python scheduler.py
+```
+
+### Production Systemd Service:
+Create `/etc/systemd/system/rise-hrms-rental-scheduler.service` on the server:
+
+```ini
+[Unit]
+Description=Dedicated Background Scheduler for RISE HRMS (Rental Invoices & Leave Credit)
+After=network.target mysql.service rise-hrms-backend.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/rise/public_html/HRMS/HRSystem
+Environment="PATH=/var/www/rise/public_html/HRMS/HRSystem/venv/bin"
+EnvironmentFile=/var/www/rise/public_html/HRMS/HRSystem/.env
+ExecStart=/var/www/rise/public_html/HRMS/HRSystem/venv/bin/python scheduler.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable rise-hrms-rental-scheduler
+sudo systemctl start rise-hrms-rental-scheduler
+sudo systemctl status rise-hrms-rental-scheduler
+```
+
+---
+
 ## 🤝 Development & Contribution
 1. Fork the repository.
 2. Create a feature branch: `git checkout -b feature/awesome`.

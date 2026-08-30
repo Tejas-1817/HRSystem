@@ -5,6 +5,41 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _generate_next_invoice_number(cursor, today_str: str) -> str:
+    """
+    Generate the next unique invoice number for today using row-level locking.
+    Format: RNT-YYYYMMDD-NNNN (e.g., RNT-20260830-0001)
+    """
+    latest = execute_single(
+        """
+        SELECT invoice_number 
+        FROM rental_invoices 
+        WHERE invoice_number LIKE %s 
+        ORDER BY invoice_number DESC 
+        LIMIT 1 
+        FOR UPDATE
+        """,
+        (f"RNT-{today_str}-%",),
+        cursor=cursor
+    )
+
+    next_seq = 1
+    if latest and latest.get("invoice_number"):
+        try:
+            raw_num = str(latest["invoice_number"]).strip()
+            seq_part = raw_num.split("-")[-1]
+            next_seq = int(seq_part) + 1
+        except (ValueError, IndexError):
+            cnt = execute_single(
+                "SELECT COUNT(*) AS count FROM rental_invoices WHERE invoice_number LIKE %s",
+                (f"RNT-{today_str}-%",),
+                cursor=cursor
+            )
+            next_seq = (cnt["count"] if cnt else 0) + 1
+
+    return f"RNT-{today_str}-{next_seq:04d}"
+
+
 def check_and_generate_invoices():
     """Daily job to check all active rental assets and auto-generate invoices if due in <= 7 days."""
     today = date.today()
@@ -42,55 +77,68 @@ def check_and_generate_invoices():
             """, (d['id'], current_due))
 
             if not existing:
-                try:
-                    with Transaction() as cursor:
-                        # Auto-generate unique invoice number
-                        today_str = today.strftime('%Y%m%d')
-                        cnt = execute_single("SELECT COUNT(*) AS count FROM rental_invoices WHERE invoice_number LIKE %s", (f"RNT-{today_str}-%",), cursor=cursor)
-                        seq = (cnt['count'] if cnt else 0) + 1
-                        invoice_num = f"RNT-{today_str}-{seq:04d}"
+                today_str = today.strftime('%Y%m%d')
+                max_retries = 5
+                for attempt in range(max_retries):
+                    try:
+                        with Transaction() as cursor:
+                            # Double-check with lock inside the transaction
+                            existing_in_tx = execute_single(
+                                "SELECT id FROM rental_invoices WHERE device_id = %s AND due_date = %s FOR UPDATE",
+                                (d['id'], current_due),
+                                cursor=cursor
+                            )
+                            if existing_in_tx:
+                                break
 
-                        asset_name = f"{d['brand']} {d['model']}"
-                        monthly_amt = float(d['rental_cost'] or 0)
-                        gst_amt = round(monthly_amt * 0.18, 2)  # 18% GST
-                        total_amt = monthly_amt + gst_amt
+                            invoice_num = _generate_next_invoice_number(cursor, today_str)
 
-                        # Calculate Period
-                        period_start = current_due
-                        # Period end is 1 month minus 1 day after period_start
-                        month = period_start.month + 1
-                        year = period_start.year
-                        if month > 12:
-                            month = 1
-                            year += 1
-                        last_day = calendar.monthrange(year, month)[1]
-                        period_end = date(year, month, min(period_start.day, last_day)) - timedelta(days=1)
+                            asset_name = f"{d['brand']} {d['model']}"
+                            monthly_amt = float(d['rental_cost'] or 0)
+                            gst_amt = round(monthly_amt * 0.18, 2)  # 18% GST
+                            total_amt = monthly_amt + gst_amt
 
-                        cursor.execute("""
-                            INSERT INTO rental_invoices (invoice_number, device_id, vendor_name, asset_name, device_type,
-                                                         rental_start_date, rental_end_date, monthly_rental_amount, gst_amount,
-                                                         total_amount, due_date, status, generated_date)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'Pending', %s)
-                        """, (invoice_num, d['id'], d['vendor_name'], asset_name, d['device_type'],
-                              period_start, period_end, monthly_amt, gst_amt, total_amt, current_due, today))
+                            # Calculate Period
+                            period_start = current_due
+                            # Period end is 1 month minus 1 day after period_start
+                            month = period_start.month + 1
+                            year = period_start.year
+                            if month > 12:
+                                month = 1
+                                year += 1
+                            last_day = calendar.monthrange(year, month)[1]
+                            period_end = date(year, month, min(period_start.day, last_day)) - timedelta(days=1)
 
-                        # Calculate Days Remaining
-                        days_rem = (current_due - today).days
+                            cursor.execute("""
+                                INSERT INTO rental_invoices (invoice_number, device_id, vendor_name, asset_name, device_type,
+                                                             rental_start_date, rental_end_date, monthly_rental_amount, gst_amount,
+                                                             total_amount, due_date, status, generated_date)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'Pending', %s)
+                            """, (invoice_num, d['id'], d['vendor_name'], asset_name, d['device_type'],
+                                  period_start, period_end, monthly_amt, gst_amt, total_amt, current_due, today))
 
-                        # Show notification in base bell feed for HR and Admins
-                        cursor.execute("""
-                            INSERT INTO notifications (employee_name, title, message, type)
-                            SELECT DISTINCT u.employee_name, %s, %s, 'rental_invoice'
-                            FROM users u
-                            WHERE u.role IN ('hr', 'admin')
-                        """, (
-                            "Rental Invoice Generated",
-                            f"Invoice {invoice_num} generated for {asset_name} (Vendor: {d['vendor_name']}). Amount: Rs. {total_amt}. Due: {current_due} ({days_rem} days remaining).",
-                        ))
-                    logger.info(f"Auto-generated invoice {invoice_num} for device {d['id']} due on {current_due}")
-                except Exception as ex:
-                    logger.error(f"Failed to auto-generate invoice for device {d['id']} due on {current_due}: {ex}")
-                    break
+                            # Calculate Days Remaining
+                            days_rem = (current_due - today).days
+
+                            # Show notification in base bell feed for HR and Admins
+                            cursor.execute("""
+                                INSERT INTO notifications (employee_name, title, message, type)
+                                SELECT DISTINCT u.employee_name, %s, %s, 'rental_invoice'
+                                FROM users u
+                                WHERE u.role IN ('hr', 'admin')
+                            """, (
+                                "Rental Invoice Generated",
+                                f"Invoice {invoice_num} generated for {asset_name} (Vendor: {d['vendor_name']}). Amount: Rs. {total_amt}. Due: {current_due} ({days_rem} days remaining).",
+                            ))
+                        logger.info(f"Auto-generated invoice {invoice_num} for device {d['id']} due on {current_due}")
+                        break
+                    except Exception as ex:
+                        if "Duplicate entry" in str(ex) or "1062" in str(ex):
+                            logger.warning(f"Duplicate invoice number on attempt {attempt + 1}/{max_retries}, retrying: {ex}")
+                            continue
+                        else:
+                            logger.error(f"Failed to auto-generate invoice for device {d['id']} due on {current_due}: {ex}")
+                            break
 
             # Move to next month's due date
             month = current_due.month + 1

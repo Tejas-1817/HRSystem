@@ -138,30 +138,7 @@ def create_app():
     def home():
         return {"success": True, "message": "Welcome to the Modular HR Management API"}
 
-    # ── Phase 5: APScheduler Setup (Background Leave Credit Sweep) ──────────
-    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        try:
-            from apscheduler.schedulers.background import BackgroundScheduler
-            from app.services.leave_credit_service import run_credit_sweep
-
-            scheduler = BackgroundScheduler()
-
-            # Run every day at 1:00 AM
-            scheduler.add_job(
-                func=lambda: run_credit_sweep(),
-                trigger="cron",
-                hour=1,
-                minute=0,
-                id="daily_leave_credit_sweep",
-                replace_existing=True
-            )
-
-            scheduler.start()
-            logger.info("APScheduler started with daily leave credit sweep job at 01:00 AM.")
-        except Exception as e:
-            logger.error(f"Failed to start APScheduler: {e}")
-
-    # Initialize rental tables
+    # Initialize database tables
     try:
         from app.models.database import (
             initialize_rental_invoice_tables,
@@ -173,11 +150,7 @@ def create_app():
         initialize_reimbursement_tables()
         initialize_holiday_tables()
         initialize_software_tables()
-
-        # Start background scheduler for rental invoices
-        from app.services.rental_scheduler import start_rental_scheduler
-        start_rental_scheduler(app)
     except Exception as init_err:
-        app.logger.error(f"Failed to initialize database tables or schedulers: {init_err}")
+        logger.error(f"Failed to initialize database tables: {init_err}")
 
     return app
