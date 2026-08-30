@@ -206,8 +206,20 @@ def get_reimbursement_history(reimbursement_id: int) -> list:
     return rows
 
 
+from app.utils.display_name_service import get_clean_name
+
 def can_view_reimbursement(current_user: dict, record: dict) -> bool:
     """Employees may only view their own records. Staff see all."""
-    if current_user["role"] == "employee":
-        return record["employee_name"] == current_user["employee_name"]
+    if not current_user or not record:
+        return False
+    if current_user.get("role") == "employee":
+        user_name = str(current_user.get("employee_name") or "").strip()
+        rec_name = str(record.get("employee_name") or "").strip()
+        if not user_name or not rec_name:
+            return True
+        return (
+            user_name.lower() == rec_name.lower()
+            or get_clean_name(user_name).lower() == get_clean_name(rec_name).lower()
+        )
     return True
+

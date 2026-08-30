@@ -36,7 +36,7 @@ def get_matrix(current_user):
     try:
         filters = _extract_filters(request.args)
         page = int(request.args.get("page", 1))
-        page_size = int(request.args.get("page_size", 25))
+        page_size = int(request.args.get("page_size", 20))
         result = get_rental_matrix(filters, page=page, page_size=page_size, paginate=True)
         return jsonify({"success": True, **result}), 200
     except Exception as e:

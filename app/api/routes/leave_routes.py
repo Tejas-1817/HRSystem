@@ -16,6 +16,10 @@ from app.services.leave_service import (
     calculate_leave_duration,
     validate_approval_authority,
     get_employee_manager,
+    get_employee_project_managers,
+    create_leave_signoffs,
+    get_leave_signoffs,
+    process_leave_signoff,
 )
 from app.utils.helpers import log_audit_event
 from app.services.leave_notification_service import (
@@ -180,12 +184,8 @@ def _build_visibility_clause(current_user: dict, include_self_for_manager: bool 
     role = current_user["role"]
     employee_name = current_user["employee_name"]
 
-    if role == "admin":
+    if role in ("admin", "hr"):
         return "1=1", []
-
-    if role == "hr":
-        # HR can view all non-HR/non-admin leave requests org-wide.
-        return "l.requester_role NOT IN ('hr', 'admin')", []
 
     if role == "manager":
         team_clause = _manager_team_exists_clause()
@@ -203,14 +203,8 @@ def _can_view_leave(current_user: dict, leave_row: dict) -> bool:
     Mirrors _build_visibility_clause semantics.
     """
     role = current_user["role"]
-    if role == "admin":
+    if role in ("admin", "hr"):
         return True
-
-    if role == "employee":
-        return leave_row["employee_name"] == current_user["employee_name"]
-
-    if role == "hr":
-        return leave_row.get("requester_role") not in ("hr", "admin")
 
     if role == "manager":
         if leave_row["employee_name"] == current_user["employee_name"]:
@@ -880,78 +874,63 @@ def apply_leave(current_user):
                 )
             }), 400
 
-        # ── Insert leave record (with requester_role snapshot) ───────────
-        execute_query("""
-            INSERT INTO leaves
-              (employee_name, leave_type, leave_type_category, half_day_period,
-               leave_duration, start_date, end_date, reason, status, requester_role)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s)
-        """, (
-            employee_name, leave_type, leave_type_category,
-            half_day_period, str(duration),
-            start_date, end_date, data.get("reason", ""),
-            current_user["role"],
-        ), commit=True)
-
-        # ── Fetch the new leave id ────────────────────────────────────────
+        # ── Insert leave record (with reque        # ── Fetch the new leave id ────────────────────────────────────────
         new_leave = execute_single(
             "SELECT id FROM leaves WHERE employee_name=%s ORDER BY applied_at DESC LIMIT 1",
             (employee_name,)
         )
         new_leave_id = new_leave["id"] if new_leave else None
 
-        # ── Audit history: submitted ──────────────────────────────────────
-        if new_leave_id:
-            _write_approval_history(new_leave_id, "submitted", employee_name, current_user["role"])
+        # ── Multi-Approver Signoff Creation ──────────────────────────────
+        emp_user = execute_single("SELECT role FROM users WHERE employee_name = %s LIMIT 1", (employee_name,))
+        target_role = str(emp_user["role"] if emp_user else "employee").lower().strip()
 
-        # ── Notify the correct approver ───────────────────────────────────
-        applicant_role = current_user["role"]
-        if applicant_role in ("hr", "manager"):
-            # Admin must approve
+        if new_leave_id:
+            create_leave_signoffs(new_leave_id, employee_name, target_role)
+            _write_approval_history(new_leave_id, "submitted", employee_name, target_role)
+
+        # ── Multi-Approver Notifications ─────────────────────────────────
+        if target_role in ("hr", "manager"):
             admin_name = _get_admin_name()
             if admin_name:
                 _notify(
                     admin_name,
-                    f"Leave Request Pending Approval",
-                    f"{employee_name} ({applicant_role.upper()}) has applied for {leave_type} leave "
-                    f"from {start_date} to {end_date}. Awaiting your approval.",
+                    "Leave Request Pending Approval",
+                    f"{employee_name} ({target_role.upper()}) has applied for {leave_type} leave from {start_date} to {end_date}. Awaiting your approval.",
                     "leave_pending",
                 )
         else:
-            # Employee: notify their assigned manager
-            manager_name = get_employee_manager(employee_name)
-            if manager_name:
+            # 1. Notify all assigned project managers
+            proj_managers = get_employee_project_managers(employee_name)
+            for pm in proj_managers:
                 _notify(
-                    manager_name,
-                    f"Leave Request Pending Approval",
-                    f"{employee_name} has applied for {leave_type} leave "
-                    f"from {start_date} to {end_date}. Awaiting your approval.",
+                    pm["manager_name"],
+                    "Leave Request Pending Project Sign-off",
+                    f"{employee_name} on project '{pm['project_name']}' has applied for {leave_type} leave from {start_date} to {end_date}. Awaiting your approval.",
                     "leave_pending",
                 )
-            # Also notify HR for org-wide planning visibility.
+                _email_leave_data = {
+                    "id": new_leave_id,
+                    "employee_name": employee_name,
+                    "employee_id": None,
+                    "leave_type": leave_type,
+                    "leave_type_category": leave_type_category,
+                    "half_day_period": half_day_period,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "leave_duration": str(duration),
+                    "reason": data.get("reason", ""),
+                    "applied_at": None,
+                }
+                notify_manager_leave_application(_email_leave_data, pm["manager_name"])
+
+            # 2. Notify HR
             _notify_role_users(
                 "hr",
-                "Leave Request Pending Review",
-                f"{employee_name} has applied for {leave_type} leave from {start_date} to {end_date}.",
+                "Leave Request Pending HR Sign-off",
+                f"{employee_name} has applied for {leave_type} leave from {start_date} to {end_date}. Awaiting HR approval.",
                 "leave_pending",
             )
-
-            # ── Email: notify manager async (never blocks response) ──────
-            if manager_name:
-                _email_leave_data = {
-                    "id":                 new_leave_id,
-                    "employee_name":      employee_name,
-                    "employee_id":        None,
-                    "leave_type":         leave_type,
-                    "leave_type_category": leave_type_category,
-                    "half_day_period":    half_day_period,
-                    "start_date":         start_date,
-                    "end_date":           end_date,
-                    "leave_duration":     str(duration),
-                    "reason":             data.get("reason", ""),
-                    "applied_at":         None,
-                }
-                notify_manager_leave_application(_email_leave_data, manager_name)
 
         period_label = ""
         if leave_type_category == "half_day":
@@ -959,7 +938,7 @@ def apply_leave(current_user):
 
         return jsonify({
             "success":                   True,
-            "message":                   "Leave applied successfully — awaiting approval.",
+            "message":                   "Leave applied successfully — awaiting required sign-offs.",
             "leave_type_category":       leave_type_category,
             "half_day_period":           half_day_period,
             "duration_days":             float(duration),
@@ -972,13 +951,13 @@ def apply_leave(current_user):
 
 
 # ---------------------------------------------------------------------------
-# PATCH /leaves/<id>/approve — manager/HR approves and deducts balance
+# PATCH/PUT /leaves/<id>/approve — manager/HR approves multi-signoff
 # ---------------------------------------------------------------------------
 
 @leave_bp.route("/<int:leave_id>/approve", methods=["PATCH", "PUT"])
 @token_required
 def approve_leave(current_user, leave_id):
-    """Approve a pending leave application with RBAC enforcement."""
+    """Approve a pending leave application via multi-signoff workflow."""
     try:
         leave = execute_single("SELECT * FROM leaves WHERE id = %s", (leave_id,))
         if not leave:
@@ -987,74 +966,70 @@ def approve_leave(current_user, leave_id):
         if leave["status"] != "pending":
             return jsonify({"success": False, "error": f"Leave is already {leave['status']}"}), 400
 
-        # ── RBAC Guard ───────────────────────────────────────────────────
-        auth = validate_approval_authority(current_user, leave)
-        if not auth["ok"]:
-            return jsonify({"success": False, "error": auth["error"]}), auth.get("code", 403)
+        result = process_leave_signoff(leave, current_user, "approved")
+        if not result["ok"]:
+            return jsonify({"success": False, "error": result["error"]}), result.get("code", 400)
 
-        duration = _get_stored_duration(leave)
+        # If overall status is now fully approved:
+        if result.get("is_final") and result.get("overall_status") == "approved":
+            duration = _get_stored_duration(leave)
+            success = deduct_leave_balance(leave["employee_name"], leave["leave_type"], duration)
+            if not success:
+                return jsonify({"success": False, "error": "Insufficient leave balance — cannot approve"}), 400
 
-        success = deduct_leave_balance(leave["employee_name"], leave["leave_type"], duration)
-        if not success:
-            return jsonify({"success": False, "error": "Insufficient leave balance — cannot approve"}), 400
+            execute_query("""
+                UPDATE leaves 
+                SET status = 'approved', 
+                    approved_by = %s, 
+                    approver_role = %s, 
+                    approved_at = NOW() 
+                WHERE id = %s
+            """, (current_user["employee_name"], current_user["role"], leave_id), commit=True)
 
-        execute_query(
-            """
-            UPDATE leaves 
-            SET status = 'approved', 
-                approved_by = %s, 
-                approver_role = %s, 
-                approved_at = NOW() 
-            WHERE id = %s
-            """,
-            (current_user["employee_name"], current_user["role"], leave_id), 
-            commit=True
-        )
-
-        # ── Audit history & Notification ──────────────────────────────────
-        _write_approval_history(leave_id, "approved", current_user["employee_name"], current_user["role"])
-        _notify(
-            leave["employee_name"],
-            "Leave Approved",
-            f"Your {leave['leave_type']} leave from {leave['start_date']} to {leave['end_date']} has been approved.",
-            "leave_approved"
-        )
-        log_audit_event(current_user["user_id"], "leave_approval", f"Approved leave ID {leave_id} for {leave['employee_name']}")
-
-        # ── Email: notify employee of approval async ───────────────────
-        _approve_leave_data = dict(leave)
-        _approve_leave_data["approved_at"] = None  # just happened — use current time
-        notify_employee_leave_approved(_approve_leave_data, current_user["employee_name"])
-
-        cat = leave.get("leave_type_category", "full_day") or "full_day"
-        period_str = ""
-        if cat == "half_day" and leave.get("half_day_period"):
-            period_str = f" ({leave['half_day_period'].replace('_', ' ').title()})"
+            _write_approval_history(leave_id, "approved", current_user["employee_name"], current_user["role"])
+            _notify(
+                leave["employee_name"],
+                "Leave Approved",
+                f"Your {leave['leave_type']} leave from {leave['start_date']} to {leave['end_date']} has been approved by all required reviewers.",
+                "leave_approved"
+            )
+            log_audit_event(current_user["user_id"], "leave_approval", f"Fully approved leave ID {leave_id} for {leave['employee_name']}")
+            
+            _approve_leave_data = dict(leave)
+            _approve_leave_data["approved_at"] = None
+            notify_employee_leave_approved(_approve_leave_data, current_user["employee_name"])
+        else:
+            # Partially approved
+            _write_approval_history(leave_id, "approved", current_user["employee_name"], current_user["role"])
+            _notify(
+                leave["employee_name"],
+                "Leave Approval Update",
+                f"{current_user['employee_name']} ({current_user['role'].upper()}) approved your leave. Awaiting remaining sign-off(s).",
+                "leave_pending"
+            )
 
         return jsonify({
             "success": True,
-            "message": (
-                f"Leave approved for {leave['employee_name']} "
-                f"({float(duration):.1f} day(s){period_str} "
-                f"deducted from {leave['leave_type']} balance)."
-            )
+            "message": result["message"],
+            "overall_status": result.get("overall_status", "pending"),
+            "signoffs": result.get("signoffs", [])
         }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ---------------------------------------------------------------------------
-# PATCH /leaves/<id>/reject — manager/HR rejects a leave
+# PATCH/PUT /leaves/<id>/reject — manager/HR rejects multi-signoff
 # ---------------------------------------------------------------------------
 
 @leave_bp.route("/<int:leave_id>/reject", methods=["PATCH", "PUT"])
 @token_required
 def reject_leave(current_user, leave_id):
-    """Reject a pending leave with RBAC enforcement."""
+    """Reject a pending leave application via multi-signoff workflow."""
     try:
-        data  = request.get_json() or {}
+        data = request.get_json() or {}
         reason = data.get("reason", "No reason provided")
-        
+
         leave = execute_single("SELECT * FROM leaves WHERE id = %s", (leave_id,))
         if not leave:
             return jsonify({"success": False, "error": "Leave application not found"}), 404
@@ -1062,17 +1037,15 @@ def reject_leave(current_user, leave_id):
         if leave["status"] == "rejected":
             return jsonify({"success": True, "message": "Leave is already rejected"}), 200
 
-        # ── RBAC Guard ───────────────────────────────────────────────────
-        auth = validate_approval_authority(current_user, leave)
-        if not auth["ok"]:
-            return jsonify({"success": False, "error": auth["error"]}), auth.get("code", 403)
+        result = process_leave_signoff(leave, current_user, "rejected", comments=reason)
+        if not result["ok"]:
+            return jsonify({"success": False, "error": result["error"]}), result.get("code", 400)
 
         if leave["status"] == "approved":
             duration = _get_stored_duration(leave)
             refund_leave_balance(leave["employee_name"], leave["leave_type"], duration)
 
-        execute_query(
-            """
+        execute_query("""
             UPDATE leaves 
             SET status = 'rejected', 
                 rejection_reason = %s,
@@ -1080,22 +1053,17 @@ def reject_leave(current_user, leave_id):
                 approver_role = %s, 
                 approved_at = NOW() 
             WHERE id = %s
-            """,
-            (reason, current_user["employee_name"], current_user["role"], leave_id),
-            commit=True
-        )
+        """, (reason, current_user["employee_name"], current_user["role"], leave_id), commit=True)
 
-        # ── Audit history & Notification ──────────────────────────────────
         _write_approval_history(leave_id, "rejected", current_user["employee_name"], current_user["role"], reason)
         _notify(
             leave["employee_name"],
             "Leave Rejected",
-            f"Your {leave['leave_type']} leave from {leave['start_date']} to {leave['end_date']} was rejected. Reason: {reason}",
+            f"Your {leave['leave_type']} leave from {leave['start_date']} to {leave['end_date']} was rejected by {current_user['employee_name']}. Reason: {reason}",
             "leave_rejected"
         )
         log_audit_event(current_user["user_id"], "leave_rejection", f"Rejected leave ID {leave_id} for {leave['employee_name']}")
-
-        # ── Email: notify employee of rejection async ──────────────────
+        
         notify_employee_leave_rejected(
             leave_data=dict(leave),
             rejector_name=current_user["employee_name"],
@@ -1104,8 +1072,10 @@ def reject_leave(current_user, leave_id):
 
         return jsonify({
             "success": True,
-            "message": f"Leave rejected for {leave['employee_name']}",
-            "reason":  reason
+            "message": result["message"],
+            "overall_status": "rejected",
+            "signoffs": result.get("signoffs", []),
+            "reason": reason
         }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

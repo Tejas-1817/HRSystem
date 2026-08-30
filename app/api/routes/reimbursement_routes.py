@@ -504,7 +504,7 @@ def mark_paid(current_user, record_id):
 # ---------------------------------------------------------------------------
 
 @reimbursement_bp.route("/<int:record_id>/history", methods=["GET"])
-@role_required(["hr", "manager"])
+@token_required
 def get_history(current_user, record_id):
     """Returns the full immutable audit trail for a reimbursement claim."""
     try:
@@ -512,11 +512,14 @@ def get_history(current_user, record_id):
         if not record:
             return jsonify({"success": False, "error": "Reimbursement not found"}), 404
 
+        if not can_view_reimbursement(current_user, record):
+            return jsonify({"success": False, "error": "Access denied"}), 403
+
         history = get_reimbursement_history(record_id)
 
         return jsonify({
             "success": True,
-            "ref":     record["ref"],
+            "ref":     record.get("ref", ""),
             "history": history,
             "count":   len(history),
         }), 200

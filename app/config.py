@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
     DB_NAME = os.getenv("DB_NAME", "starterdata")
     DB_USER = os.getenv("DB_USER", "tejas")
     DB_PASS = os.getenv("DB_PASS", "NewPassword@123")

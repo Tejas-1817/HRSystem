@@ -116,7 +116,7 @@ def _build_base_conditions(filters: dict):
     return conditions, params
 
 
-def get_rental_matrix(filters: dict = None, page: int = 1, page_size: int = 25, paginate: bool = True):
+def get_rental_matrix(filters: dict = None, page: int = 1, page_size: int = 20, paginate: bool = True):
     """
     Returns paginated rental matrix rows.
     Each row includes a 'months' dict keyed by month name with {amount, status}.

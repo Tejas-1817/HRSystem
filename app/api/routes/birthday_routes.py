@@ -4,6 +4,41 @@ from app.api.middleware.auth import token_required
 
 birthday_bp = Blueprint('birthdays', __name__)
 
+def _serialize_birthdays(rows):
+    if not rows:
+        return []
+    items = rows if isinstance(rows, list) else [rows]
+    for item in items:
+        if isinstance(item, dict):
+            for k, v in list(item.items()):
+                if v is not None and not isinstance(v, (str, int, float, bool, list, dict)):
+                    item[k] = str(v)
+    return items
+
+@birthday_bp.route("", methods=["GET"])
+@birthday_bp.route("/", methods=["GET"])
+@birthday_bp.route("/all", methods=["GET"])
+@token_required
+def get_all_birthdays(current_user):
+    """Fetch all team members' public birthday info for organization widgets."""
+    try:
+        query = """
+            SELECT e.id, e.name, e.date_of_birth, e.photo, e.designation, e.department, u.role
+            FROM employee e
+            LEFT JOIN users u ON e.name = u.employee_name
+            WHERE e.date_of_birth IS NOT NULL
+        """
+        rows = execute_query(query) or []
+        serialized = _serialize_birthdays(rows)
+        return jsonify({
+            "success": True,
+            "count": len(serialized),
+            "birthdays": serialized,
+            "data": serialized
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @birthday_bp.route("/today", methods=["GET"])
 @token_required
 def get_todays_birthdays(current_user):
@@ -16,12 +51,13 @@ def get_todays_birthdays(current_user):
             WHERE MONTH(date_of_birth) = MONTH(CURDATE())
               AND DAY(date_of_birth) = DAY(CURDATE())
         """
-        rows = execute_query(query)
+        rows = execute_query(query) or []
+        serialized = _serialize_birthdays(rows)
         return jsonify({
             "success": True, 
-            "count": len(rows),
-            "birthdays": rows,
-            "message": f"{len(rows)} birthday(s) today!" if rows else "No birthdays today."
+            "count": len(serialized),
+            "birthdays": serialized,
+            "message": f"{len(serialized)} birthday(s) today!" if serialized else "No birthdays today."
         }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -43,11 +79,12 @@ def get_upcoming_birthdays(current_user):
             HAVING days_until_birthday BETWEEN 1 AND 7
             ORDER BY days_until_birthday ASC
         """
-        rows = execute_query(query)
+        rows = execute_query(query) or []
+        serialized = _serialize_birthdays(rows)
         return jsonify({
             "success": True, 
-            "count": len(rows),
-            "upcoming_birthdays": rows
+            "count": len(serialized),
+            "upcoming_birthdays": serialized
         }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
