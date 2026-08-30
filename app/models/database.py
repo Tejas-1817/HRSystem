@@ -67,14 +67,15 @@ class Transaction:
             cursor.execute(...)
             cursor.execute(...)
     """
-    def __init__(self, dictionary=True):
+    def __init__(self, dictionary=True, buffered=True):
         self.conn = None
         self.cursor = None
         self.dictionary = dictionary
+        self.buffered = buffered
 
     def __enter__(self):
         self.conn = get_connection()
-        self.cursor = self.conn.cursor(dictionary=self.dictionary)
+        self.cursor = self.conn.cursor(dictionary=self.dictionary, buffered=self.buffered)
         return self.cursor
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -85,8 +86,10 @@ class Transaction:
             else:
                 self.conn.commit()
         finally:
-            self.cursor.close()
-            self.conn.close()           # returns connection to pool
+            if self.cursor:
+                self.cursor.close()
+            if self.conn:
+                self.conn.close()           # returns connection to pool
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +105,7 @@ def execute_query(query, params=None, dictionary=True, commit=False, cursor=None
         return cursor.fetchall() if not commit else cursor.rowcount
 
     conn = get_connection()
-    _cursor = conn.cursor(dictionary=dictionary)
+    _cursor = conn.cursor(dictionary=dictionary, buffered=True)
     try:
         _cursor.execute(query, params or ())
         if commit:
@@ -121,7 +124,7 @@ def execute_single(query, params=None, dictionary=True, cursor=None):
         return cursor.fetchone()
 
     conn = get_connection()
-    _cursor = conn.cursor(dictionary=dictionary)
+    _cursor = conn.cursor(dictionary=dictionary, buffered=True)
     try:
         _cursor.execute(query, params or ())
         return _cursor.fetchone()
