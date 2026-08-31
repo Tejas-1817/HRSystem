@@ -12,7 +12,7 @@ def _derive_attendance_rows(current_user):
     Build attendance view from timesheet entries.
     Compatibility: retains legacy attendance keys consumed by older UI.
     """
-    if current_user["role"] in ("manager", "hr"):
+    if current_user["role"] in ("manager", "hr", "admin", "superadmin"):
         rows = execute_query(
             """
             SELECT

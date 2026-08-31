@@ -208,9 +208,9 @@ def get_joinee(current_user,joinee_id):
         if not joinee:
             return jsonify({"success": False, "error": "Joinee not found"}), 404
 
-        # RBAC: hr/admin can view any; onboarding_candidate can only view their own
+        # RBAC: hr/admin/superadmin can view any; onboarding_candidate can only view their own
         user_role = current_user.get("role", "")
-        if user_role not in ("hr", "admin"):
+        if user_role not in ("hr", "admin", "superadmin"):
             if user_role == "onboarding_candidate":
                 user_id = current_user.get("user_id")
                 if joinee.get("user_id") != user_id:

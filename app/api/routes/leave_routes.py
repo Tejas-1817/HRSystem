@@ -184,7 +184,7 @@ def _build_visibility_clause(current_user: dict, include_self_for_manager: bool 
     role = current_user["role"]
     employee_name = current_user["employee_name"]
 
-    if role in ("admin", "hr"):
+    if role in ("admin", "hr", "superadmin"):
         return "1=1", []
 
     if role == "manager":
@@ -203,7 +203,7 @@ def _can_view_leave(current_user: dict, leave_row: dict) -> bool:
     Mirrors _build_visibility_clause semantics.
     """
     role = current_user["role"]
-    if role in ("admin", "hr"):
+    if role in ("admin", "hr", "superadmin"):
         return True
 
     if role == "manager":
@@ -412,7 +412,7 @@ def view_leave_balance(current_user):
     Supports half-day (decimal) values.
     """
     try:
-        if current_user["role"] in ("hr", "manager") and request.args.get("employee_name"):
+        if current_user["role"] in ("hr", "manager", "admin", "superadmin") and request.args.get("employee_name"):
             emp_name = request.args.get("employee_name")
         else:
             emp_name = current_user["employee_name"]
@@ -609,7 +609,7 @@ def leave_calendar(current_user):
         if not (1 <= month <= 12):
             return jsonify({"success": False, "error": "Month must be 1-12"}), 400
 
-        if current_user["role"] in ("hr", "manager") and request.args.get("employee_name"):
+        if current_user["role"] in ("hr", "manager", "admin", "superadmin") and request.args.get("employee_name"):
             employee_name = request.args.get("employee_name")
         else:
             employee_name = current_user["employee_name"]

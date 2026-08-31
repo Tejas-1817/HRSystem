@@ -166,7 +166,7 @@ def update_allocation_config(current_user, emp_id):
 @token_required
 def view_employees(current_user):
     try:
-        if current_user["role"] in ("admin", "manager", "hr"):
+        if current_user["role"] in ("admin", "manager", "hr", "superadmin"):
             query = """
                 SELECT e.*, COALESCE(u.role, e.role) as role,
                        COALESCE(lb.total, 0) as total_leaves, 

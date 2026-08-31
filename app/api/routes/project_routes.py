@@ -124,7 +124,7 @@ def view_projects(current_user):
         select_cols = _project_select_columns()
         manager_join = _manager_join_clause()
 
-        if current_user["role"] == "hr":
+        if current_user["role"] in ("hr", "admin", "superadmin"):
             if search_id:
                 rows = execute_query(
                     f"""

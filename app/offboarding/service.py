@@ -68,7 +68,7 @@ def initiate_offboarding(employee_id, employee_name, reason, reason_notes, last_
         return offboarding_id
 
 def get_offboarding_requests(user_role, user_id):
-    if user_role in ['hr', 'accounts']:
+    if user_role in ['hr', 'accounts', 'admin', 'superadmin']:
         return execute_query("SELECT * FROM offboarding_request ORDER BY created_at DESC")
     elif user_role == 'manager':
         # Get employees where this manager is the project manager or reporting manager
