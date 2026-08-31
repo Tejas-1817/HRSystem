@@ -121,7 +121,7 @@ def get_rental_matrix(filters: dict = None, page: int = 1, page_size: int = 20, 
     Returns paginated rental matrix rows.
     Each row includes a 'months' dict keyed by month name with {amount, status}.
     """
-    year = int(filters.get('year', date.today().year)) if filters else date.today().year
+    year = int(filters.get('year') or date.today().year) if filters else date.today().year
     month_filter = filters.get('month') if filters else None
 
     conditions, params = _build_base_conditions(filters)

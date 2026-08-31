@@ -119,8 +119,8 @@ def get_device(current_user, device_id):
     if not device:
         return jsonify({"success": False, "error": "Device not found"}), 404
     
-    # RBAC check: employees can only view if assigned to them or if they are HR
-    if current_user["role"] not in ("hr", "admin"):
+    # RBAC check: employees can only view if assigned to them or if they are HR/Admin/Superadmin
+    if current_user["role"] not in ("hr", "admin", "superadmin"):
         # Check current assignment
         assignments = get_employee_devices(current_user["employee_name"])
         if not any(d["id"] == device_id for d in assignments):
@@ -441,7 +441,7 @@ def view_agreement(current_user, device_id):
     """
     try:
         # Determine whose agreement to fetch
-        if current_user["role"] in ("hr", "admin"):
+        if current_user["role"] in ("hr", "admin", "superadmin"):
             # HR can view the agreement for whoever is currently assigned
             from app.models.database import execute_single
             assignment = execute_single("""
@@ -562,7 +562,7 @@ def device_acceptance_status(current_user, device_id):
         status = get_acceptance_status(device_id)
 
         # RBAC for employees: only view own assignment
-        if current_user["role"] not in ("hr", "admin"):
+        if current_user["role"] not in ("hr", "admin", "superadmin"):
             if status.get("assigned") and status.get("employee_name") != current_user["employee_name"]:
                 return jsonify({"success": False, "error": "Access denied"}), 403
 

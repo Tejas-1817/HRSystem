@@ -422,8 +422,8 @@ def mark_paid(current_user, record_id):
     Payload (optional): { "payment_date": "2026-04-30", "note": "Bank transfer ref: TXN123" }
     """
     try:
-        # Only admin can mark as paid (HR/Manager bypass comes from decorator, extra check below)
-        if current_user["role"] != "admin":
+        # Only admin/superadmin can mark as paid
+        if current_user["role"] not in ("admin", "superadmin"):
             return jsonify({
                 "success": False,
                 "error":   "Only Admin can mark claims as paid."
@@ -610,8 +610,8 @@ def delete_reimbursement(current_user, record_id):
             return jsonify({"success": True,
                             "message": f"Claim {record['ref']} withdrawn successfully."}), 200
 
-        # Admin: can delete any record
-        if role == "admin":
+        # Admin & Super Admin: can delete any record
+        if role in ("admin", "superadmin"):
             execute_query("DELETE FROM reimbursements WHERE id = %s", (record_id,), commit=True)
             return jsonify({"success": True,
                             "message": f"Claim {record['ref']} deleted by admin."}), 200

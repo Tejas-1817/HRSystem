@@ -135,6 +135,16 @@ def reset_defaults(current_user):
                                 (role, permission_id, old_value, new_value, changed_by, changed_by_name)
                                 VALUES (%s, %s, %s, %s, %s, %s)
                             """, (r, perm_id, old_value, is_granted, current_user["user_id"], current_user["employee_name"] or current_user["username"]))
+                    else:
+                        cursor.execute("""
+                            INSERT INTO role_permissions (role, permission_id, is_granted, updated_by)
+                            VALUES (%s, %s, %s, %s)
+                        """, (r, perm_id, is_granted, current_user["user_id"]))
+                        cursor.execute("""
+                            INSERT INTO role_permission_audit_log 
+                            (role, permission_id, old_value, new_value, changed_by, changed_by_name)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """, (r, perm_id, None, is_granted, current_user["user_id"], current_user["employee_name"] or current_user["username"]))
 
         refresh_permissions_cache()
         

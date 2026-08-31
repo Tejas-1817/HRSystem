@@ -162,8 +162,8 @@ def list_all_team_members(current_user):
         List of team member records
     """
     try:
-        # Only HR/Admin can list all team members
-        if current_user.get("role") not in ["hr", "admin"]:
+        # Only HR/Admin/Superadmin can list all team members
+        if current_user.get("role") not in ["hr", "admin", "superadmin"]:
             return jsonify({
                 "success": False,
                 "error": get_message("permissions_denied", entity_plural=get_label("entity_plural"))
@@ -215,8 +215,8 @@ def get_single_team_member(current_user, team_member_id):
                 "error": get_message("not_found_with_id", id=team_member_id)
             }), 404
         
-        # Authorization: Users can only view their own profile or HR/Admin can view all
-        if current_user.get("role") not in ["hr", "admin"] and \
+        # Authorization: Users can only view their own profile or HR/Admin/Superadmin can view all
+        if current_user.get("role") not in ["hr", "admin", "superadmin"] and \
            current_user.get("employee_name") != team_member.get("name"):
             return jsonify({
                 "success": False,

@@ -184,7 +184,11 @@ def _build_visibility_clause(current_user: dict, include_self_for_manager: bool 
     role = current_user["role"]
     employee_name = current_user["employee_name"]
 
+<<<<<<< Updated upstream
     if role in ("admin", "hr"):
+=======
+    if role in ("admin", "superadmin"):
+>>>>>>> Stashed changes
         return "1=1", []
 
     if role == "manager":
@@ -203,7 +207,11 @@ def _can_view_leave(current_user: dict, leave_row: dict) -> bool:
     Mirrors _build_visibility_clause semantics.
     """
     role = current_user["role"]
+<<<<<<< Updated upstream
     if role in ("admin", "hr"):
+=======
+    if role in ("admin", "superadmin"):
+>>>>>>> Stashed changes
         return True
 
     if role == "manager":
@@ -412,7 +420,7 @@ def view_leave_balance(current_user):
     Supports half-day (decimal) values.
     """
     try:
-        if current_user["role"] in ("hr", "manager") and request.args.get("employee_name"):
+        if current_user["role"] in ("hr", "manager", "admin", "superadmin") and request.args.get("employee_name"):
             emp_name = request.args.get("employee_name")
         else:
             emp_name = current_user["employee_name"]
@@ -451,7 +459,7 @@ def view_leave_balance(current_user):
 # ---------------------------------------------------------------------------
 
 @leave_bp.route("/balance/all", methods=["GET"])
-@role_required(["hr", "manager"])
+@role_required(["hr", "manager", "admin", "superadmin"])
 def view_all_leave_balances(current_user):
     """HR-only: returns leave balances for every employee, grouped by name."""
     try:
@@ -496,7 +504,7 @@ def view_leave_config(current_user):
 # ---------------------------------------------------------------------------
 
 @leave_bp.route("/currently-on-leave", methods=["GET"])
-@role_required(["manager", "hr"])
+@role_required(["manager", "hr", "admin", "superadmin"])
 def get_currently_on_leave(current_user):
     try:
         if current_user["role"] == "manager":
@@ -609,7 +617,7 @@ def leave_calendar(current_user):
         if not (1 <= month <= 12):
             return jsonify({"success": False, "error": "Month must be 1-12"}), 400
 
-        if current_user["role"] in ("hr", "manager") and request.args.get("employee_name"):
+        if current_user["role"] in ("hr", "manager", "admin", "superadmin") and request.args.get("employee_name"):
             employee_name = request.args.get("employee_name")
         else:
             employee_name = current_user["employee_name"]

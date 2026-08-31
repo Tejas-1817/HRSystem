@@ -74,8 +74,8 @@ def get_tickets(current_user: dict, filters: dict) -> list:
     conditions = []
     params = []
 
-    # Scope to own tickets for everyone except admin
-    if role != "admin":
+    # Scope to own tickets for everyone except admin / superadmin / hr
+    if role not in ("admin", "superadmin", "hr"):
         conditions.append("t.employee_name = %s")
         params.append(emp)
 
@@ -181,10 +181,10 @@ def can_view_ticket(current_user: dict, ticket: dict) -> bool:
       - admin → all tickets
     """
     role = current_user["role"]
-    if role != "admin":
+    if role not in ("admin", "superadmin", "hr"):
         return ticket["employee_name"] == current_user["employee_name"]
-    return True  # admin
+    return True  # admin / superadmin / hr
 
 
 # Roles that have Admin-level read/write access to tickets
-STAFF_ROLES = {"admin"}
+STAFF_ROLES = {"admin", "superadmin", "hr"}

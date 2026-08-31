@@ -449,8 +449,8 @@ def update_priority(current_user, ticket_id):
     Payload: { "priority": "urgent", "note": "Escalated by CTO." }
     """
     try:
-        # Additional check: only admin can change priority
-        if current_user["role"] != "admin":
+        # Additional check: only admin/superadmin can change priority
+        if current_user["role"] not in ("admin", "superadmin"):
             return jsonify({
                 "success": False,
                 "error":   "Only admins can change ticket priority."
@@ -509,7 +509,7 @@ def delete_ticket(current_user, ticket_id):
     HR/Managers close through PATCH /status.
     """
     try:
-        if current_user["role"] != "admin":
+        if current_user["role"] not in ("admin", "superadmin"):
             return jsonify({
                 "success": False,
                 "error":   "Only admins can delete tickets. Use PATCH /<id>/status to close."

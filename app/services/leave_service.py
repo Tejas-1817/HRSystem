@@ -51,8 +51,19 @@ def validate_approval_authority(approver: dict, leave: dict) -> dict:
             "code": 403,
         }
 
+<<<<<<< Updated upstream
     # ── Admin/Superadmin bypass: can approve everyone except themselves ───────────
     if approver_role in ("admin", "superadmin"):
+=======
+    # ── Admin & Superadmin bypass: can approve everyone except themselves ────
+    if approver_role in ("admin", "superadmin"):
+        if requester_role in ("admin", "superadmin"):
+            return {
+                "ok": False,
+                "error": "Admin/Superadmin leave requests do not require approval.",
+                "code": 400,
+            }
+>>>>>>> Stashed changes
         return {"ok": True}
 
     # ── Lookup allowed approvers for this requester's role ───────────────────

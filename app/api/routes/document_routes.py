@@ -47,7 +47,7 @@ def upload_document(current_user):
         from app.utils.file_upload import save_upload, ALLOWED_DOC_EXTENSIONS
 
         # ── 1. Determine target employee ──────────────────────────────────
-        if current_user["role"] in ("hr", "admin"):
+        if current_user["role"] in ("hr", "admin", "superadmin"):
             employee_name = request.form.get("employee_name") or current_user["employee_name"]
         else:
             # Employees cannot upload for others

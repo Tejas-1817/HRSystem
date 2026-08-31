@@ -152,7 +152,7 @@ def _can_view(current_user: dict, target_employee_name: str) -> bool:
     role = current_user.get("role", "")
     requester_name = current_user.get("employee_name", "")
 
-    if role in ("admin", "hr"):
+    if role in ("admin", "hr", "superadmin"):
         return True
 
     # Own profile is always visible

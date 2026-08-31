@@ -134,7 +134,7 @@ def get_timesheet_managers(current_user):
 @token_required
 def view_timesheets(current_user):
     try:
-        if current_user["role"] in ("admin", "hr"):
+        if current_user["role"] in ("admin", "hr", "superadmin"):
             rows = execute_query("""
                 SELECT t.*, p.project_id
                 FROM timesheets t

@@ -124,7 +124,7 @@ def view_projects(current_user):
         select_cols = _project_select_columns()
         manager_join = _manager_join_clause()
 
-        if current_user["role"] == "hr":
+        if current_user["role"] in ("hr", "admin", "superadmin"):
             if search_id:
                 rows = execute_query(
                     f"""
@@ -338,7 +338,7 @@ def update_project(current_user, project_id):
             return jsonify({"success": False, "error": "Only HR can change project manager assignment."}), 403
 
         manager_name = project.get("manager_name")
-        if current_user["role"] == "hr":
+        if current_user["role"] in ("hr", "admin", "superadmin"):
             resolved = _resolve_manager_name_from_payload(data)
             manager_keys_sent = any(
                 data.get(k) not in (None, "")

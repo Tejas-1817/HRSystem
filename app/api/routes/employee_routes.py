@@ -166,7 +166,7 @@ def update_allocation_config(current_user, emp_id):
 @token_required
 def view_employees(current_user):
     try:
-        if current_user["role"] in ("admin", "manager", "hr"):
+        if current_user["role"] in ("admin", "manager", "hr", "superadmin"):
             query = """
                 SELECT e.*, COALESCE(u.role, e.role) as role,
                        COALESCE(lb.total, 0) as total_leaves, 
@@ -302,7 +302,11 @@ def get_employee(current_user, emp_id):
         return jsonify({"success": False, "error": "Failed to fetch employee details"}), 500
 
 @employee_bp.route("/", methods=["POST"], strict_slashes=False)
+<<<<<<< Updated upstream
 @role_required(["hr", "admin"])
+=======
+@role_required(["hr", "admin", "superadmin"])
+>>>>>>> Stashed changes
 def add_employee(current_user):
     try:
         # Support both form-data (multipart) and JSON requests

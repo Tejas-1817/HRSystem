@@ -59,7 +59,7 @@ def report_project_billing(current_user):
 @token_required
 def view_payslips(current_user):
     try:
-        if current_user["role"] in ("manager", "hr"):
+        if current_user["role"] in ("manager", "hr", "admin", "superadmin"):
             rows = execute_query("SELECT id, employee_name, month, year, created_at FROM payslips ORDER BY year DESC, created_at DESC")
         else:
             rows = execute_query("SELECT id, employee_name, month, year, created_at FROM payslips WHERE employee_name=%s ORDER BY year DESC, created_at DESC", (current_user["employee_name"],))

@@ -44,8 +44,8 @@ def validate_approval_authority(approver: dict, timesheet: dict) -> tuple[bool, 
     if approver_role == "employee":
         return False, "Employees do not have timesheet approval permissions."
 
-    # ── 3. Admin: full authority (except self-approval, already blocked) ──
-    if approver_role == "admin":
+    # ── 3. Admin & Superadmin: full authority (except self-approval, already blocked) ──
+    if approver_role in ("admin", "superadmin"):
         return True, ""
 
     # ── 4. Manager: can approve employee timesheets assigned to them or on their projects ─
@@ -313,8 +313,8 @@ def get_pending_approvals(approver: dict) -> list[dict]:
     approver_role = approver["role"]
     approver_name = approver["employee_name"]
 
-    if approver_role == "admin":
-        # Admin sees all pending timesheets (primary audience: HR + Manager entries)
+    if approver_role in ("admin", "superadmin"):
+        # Admin/Super Admin sees all pending timesheets (primary audience: HR + Manager entries)
         rows = execute_query("""
             SELECT t.*, u.role as owner_role_live
             FROM timesheets t
