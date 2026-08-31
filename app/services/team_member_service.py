@@ -329,7 +329,7 @@ def update_team_member_role(actor_user_id, target_user_id, new_role):
 
 def get_team_member(team_member_id: int):
     """
-    Fetch team member details by ID.
+    Fetch team member details by database ID.
     
     Args:
         team_member_id: Team member database ID
@@ -440,7 +440,7 @@ def update_team_member(team_member_id: int, update_data: dict, updated_by: str =
 
 def delete_team_member(team_member_id: int, admin_id: int):
     """
-    Soft delete a team member (preserves audit trail).
+    Delete a team member and clean up linked tables.
     
     Args:
         team_member_id: Team member database ID
@@ -451,24 +451,68 @@ def delete_team_member(team_member_id: int, admin_id: int):
     """
     with Transaction() as cursor:
         # Get team member info before deletion
-        cursor.execute("SELECT name FROM employee WHERE id = %s", (team_member_id,))
+        cursor.execute("SELECT name, email FROM employee WHERE id = %s", (team_member_id,))
         team_member = cursor.fetchone()
         
         if not team_member:
             raise ValueError(get_message("not_found"))
         
-        # Soft delete (set is_deleted flag if exists, or just mark inactive)
-        cursor.execute(
-            "UPDATE employee SET deleted_at = NOW() WHERE id = %s",
-            (team_member_id,)
-        )
+        emp_name = team_member['name']
+        emp_email = team_member.get('email')
         
-        # Audit log
-        cursor.execute("""
-            INSERT INTO audit_logs (user_id, event_type, description)
-            VALUES (%s, %s, %s)
-        """, (admin_id, "team_member_deleted", 
-              get_audit_event("entity_deleted", name=team_member['name'])))
+        cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+        try:
+            # Clean up related tables
+            related_tables = [
+                "attendance", "bank_details", "employee_documents", 
+                "leave_balance", "leaves", "notifications", 
+                "payslips", "project_assignments", "timesheets", "device_assignments",
+                "helpdesk_tickets", "reimbursements"
+            ]
+            for table in related_tables:
+                try:
+                    cursor.execute(f"DELETE FROM {table} WHERE employee_name = %s", (emp_name,))
+                except Exception as e:
+                    logger.warning(f"Could not delete from {table} for {emp_name}: {e}")
+            
+            # Clean up offboarding requests referencing this employee_id
+            try:
+                cursor.execute("DELETE FROM offboarding_checklist_item WHERE offboarding_id IN (SELECT id FROM offboarding_request WHERE employee_id = %s)", (team_member_id,))
+                cursor.execute("DELETE FROM offboarding_approval WHERE offboarding_id IN (SELECT id FROM offboarding_request WHERE employee_id = %s)", (team_member_id,))
+                cursor.execute("DELETE FROM offboarding_request WHERE employee_id = %s", (team_member_id,))
+            except Exception as offboard_err:
+                logger.warning(f"Could not delete offboarding_request for emp {team_member_id}: {offboard_err}")
+
+            # Clean up onboarding records if this employee was a joinee
+            try:
+                cursor.execute("DELETE FROM onboarding_declaration WHERE joinee_id IN (SELECT id FROM onboarding_joinee WHERE employee_id = %s)", (team_member_id,))
+                cursor.execute("DELETE FROM onboarding_document WHERE joinee_id IN (SELECT id FROM onboarding_joinee WHERE employee_id = %s)", (team_member_id,))
+                cursor.execute("DELETE FROM onboarding_history WHERE joinee_id IN (SELECT id FROM onboarding_joinee WHERE employee_id = %s)", (team_member_id,))
+                cursor.execute("DELETE FROM onboarding_joinee WHERE employee_id = %s", (team_member_id,))
+            except Exception as onboard_err:
+                logger.warning(f"Could not delete onboarding_joinee for emp {team_member_id}: {onboard_err}")
+
+            # Delete user account(s)
+            cursor.execute("""
+                DELETE FROM users 
+                WHERE employee_id = %s OR employee_name = %s 
+                   OR (username = %s AND %s IS NOT NULL AND %s != '')
+            """, (team_member_id, emp_name, emp_email, emp_email, emp_email))
+            
+            # Delete from employee table
+            cursor.execute("DELETE FROM employee WHERE id = %s", (team_member_id,))
+            
+            # Audit log
+            try:
+                cursor.execute("""
+                    INSERT INTO audit_logs (user_id, event_type, description)
+                    VALUES (%s, %s, %s)
+                """, (admin_id, "team_member_deleted", 
+                      get_audit_event("entity_deleted", name=emp_name)))
+            except Exception:
+                pass
+        finally:
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
     
     return {"success": True, "message": get_message("deleted_success")}
 

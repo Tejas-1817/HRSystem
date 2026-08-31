@@ -1,0 +1,18 @@
+[Unit]
+Description=Dedicated Background Scheduler for RISE HRMS (Rental Invoices & Leave Credit)
+After=network.target mysql.service rise-hrms-backend.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/rise/public_html/HRMS/HRSystem
+Environment="PATH=/var/www/rise/public_html/HRMS/HRSystem/venv/bin"
+EnvironmentFile=/var/www/rise/public_html/HRMS/HRSystem/.env
+ExecStart=/var/www/rise/public_html/HRMS/HRSystem/venv/bin/python scheduler.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

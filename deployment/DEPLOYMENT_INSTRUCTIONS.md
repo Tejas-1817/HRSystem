@@ -117,13 +117,14 @@ sudo systemctl reload apache2
 
 ---
 
-## STEP 6: Set up Gunicorn Services
+## STEP 6: Set up Systemd Services (Gunicorn & Dedicated Scheduler)
 
 ### 6a. Copy the service files
-Upload `rise-hrms-backend.service` and `rise-hrms-frontend.service` to the VM, then:
+Upload `rise-hrms-backend.service`, `rise-hrms-frontend.service`, and `rise-hrms-rental-scheduler.service` to the VM, then:
 ```bash
 sudo cp rise-hrms-backend.service /etc/systemd/system/
 sudo cp rise-hrms-frontend.service /etc/systemd/system/
+sudo cp rise-hrms-rental-scheduler.service /etc/systemd/system/
 ```
 
 ### 6b. Enable and start the services
@@ -131,8 +132,10 @@ sudo cp rise-hrms-frontend.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable rise-hrms-backend
 sudo systemctl enable rise-hrms-frontend
+sudo systemctl enable rise-hrms-rental-scheduler
 sudo systemctl start rise-hrms-backend
 sudo systemctl start rise-hrms-frontend
+sudo systemctl start rise-hrms-rental-scheduler
 ```
 
 ---
@@ -143,6 +146,7 @@ Check the statuses:
 ```bash
 sudo systemctl status rise-hrms-backend
 sudo systemctl status rise-hrms-frontend
+sudo systemctl status rise-hrms-rental-scheduler
 sudo systemctl status apache2
 ```
 
@@ -152,11 +156,12 @@ Open `https://rise.altzor.com` in a browser.
 
 ## FUTURE CODE UPDATES
 
-Backend Updates:
+Backend & Scheduler Updates:
 ```bash
 cd /var/www/rise/public_html/HRMS/HRSystem
 git pull
 sudo systemctl restart rise-hrms-backend
+sudo systemctl restart rise-hrms-rental-scheduler
 ```
 
 Frontend Updates:

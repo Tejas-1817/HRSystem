@@ -168,14 +168,14 @@ def view_employees(current_user):
     try:
         if current_user["role"] in ("admin", "manager", "hr"):
             query = """
-                SELECT e.*, u.role,
+                SELECT e.*, COALESCE(u.role, e.role) as role,
                        COALESCE(lb.total, 0) as total_leaves, 
                        COALESCE(lb.used, 0) as used_leaves, 
                        COALESCE(lb.remaining, 0) as remaining_leaves,
                        COALESCE(util.total_utilization, 0) as total_utilization,
                        GREATEST(0, 100 - COALESCE(util.total_utilization, 0)) as remaining_availability
                 FROM employee e
-                LEFT JOIN users u ON e.name = u.employee_name
+                LEFT JOIN users u ON (e.name = u.employee_name OR e.id = u.employee_id OR (e.email IS NOT NULL AND e.email != '' AND e.email = u.username))
                 LEFT JOIN (
                     SELECT employee_name, 
                            SUM(total_leaves) as total, 
@@ -195,12 +195,12 @@ def view_employees(current_user):
             rows = execute_query(query)
         else:
             query = """
-                SELECT e.*, u.role,
+                SELECT e.*, COALESCE(u.role, e.role) as role,
                        COALESCE(lb.total, 0) as total_leaves, 
                        COALESCE(lb.used, 0) as used_leaves, 
                        COALESCE(lb.remaining, 0) as remaining_leaves
                 FROM employee e
-                LEFT JOIN users u ON e.name = u.employee_name
+                LEFT JOIN users u ON (e.name = u.employee_name OR e.id = u.employee_id OR (e.email IS NOT NULL AND e.email != '' AND e.email = u.username))
                 LEFT JOIN (
                     SELECT employee_name, 
                            SUM(total_leaves) as total, 
@@ -240,14 +240,14 @@ def view_employees(current_user):
 def get_employee(current_user, emp_id):
     try:
         query = """
-            SELECT e.*, u.role,
+            SELECT e.*, COALESCE(u.role, e.role) as role,
                    COALESCE(lb.total, 0) as total_leaves, 
                    COALESCE(lb.used, 0) as used_leaves, 
                    COALESCE(lb.remaining, 0) as remaining_leaves,
                    COALESCE(util.total_utilization, 0) as total_utilization,
                    GREATEST(0, 100 - COALESCE(util.total_utilization, 0)) as remaining_availability
             FROM employee e
-            LEFT JOIN users u ON e.name = u.employee_name
+            LEFT JOIN users u ON (e.name = u.employee_name OR e.id = u.employee_id OR (e.email IS NOT NULL AND e.email != '' AND e.email = u.username))
             LEFT JOIN (
                 SELECT employee_name, 
                        SUM(total_leaves) as total, 
@@ -302,7 +302,7 @@ def get_employee(current_user, emp_id):
         return jsonify({"success": False, "error": "Failed to fetch employee details"}), 500
 
 @employee_bp.route("/", methods=["POST"], strict_slashes=False)
-@role_required(["hr"])
+@role_required(["hr", "admin"])
 def add_employee(current_user):
     try:
         # Support both form-data (multipart) and JSON requests
@@ -581,42 +581,88 @@ def update_employee(current_user, emp_id):
 
 
 @employee_bp.route("/<int:emp_id>", methods=["DELETE"])
-@role_required(["hr"])
+@role_required(["hr", "admin"])
 def delete_employee(current_user, emp_id):
     try:
         # 1. Fetch employee details first
-        employee = execute_single("SELECT name, email FROM employee WHERE id = %s", (emp_id,))
+        employee = execute_single("SELECT id, name, email FROM employee WHERE id = %s", (emp_id,))
         if not employee:
             return jsonify({"success": False, "error": "Employee not found"}), 404
         
         emp_name = employee["name"]
+        emp_email = employee.get("email")
         
-        logger.info(f"HR {current_user['employee_name']} is deleting employee {emp_name} (ID: {emp_id})")
+        logger.info(f"{current_user.get('role', 'User').upper()} {current_user['employee_name']} is deleting employee {emp_name} (ID: {emp_id})")
 
         with Transaction() as cursor:
-            # 2. Sequential deletion from all linked tables to maintain integrity
-            # We follow a "leaves first, trunk last" approach
-            related_tables = [
-                "attendance", "bank_details", "employee_documents", 
-                "leave_balance", "leaves", "notifications", 
-                "payslips", "project_assignments", "timesheets", "users"
-            ]
-            
-            for table in related_tables:
-                cursor.execute(f"DELETE FROM {table} WHERE employee_name = %s", (emp_name,))
-            
-            # 3. Finally, delete the employee record itself
-            cursor.execute("DELETE FROM employee WHERE id = %s", (emp_id,))
+            # Temporarily disable FK checks to allow atomic cascade deletion
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+            try:
+                # 2. Sequential deletion from linked tables
+                related_by_name = [
+                    "attendance", "bank_details", "employee_documents", 
+                    "leave_balance", "leaves", "notifications", 
+                    "payslips", "project_assignments", "timesheets", 
+                    "device_assignments", "helpdesk_tickets", "reimbursements"
+                ]
+                for table in related_by_name:
+                    try:
+                        cursor.execute(f"DELETE FROM {table} WHERE employee_name = %s", (emp_name,))
+                    except Exception as table_err:
+                        logger.warning(f"Could not delete from {table} for {emp_name}: {table_err}")
 
-        logger.info(f"Successfully deleted all records for {emp_name}")
+                # Clean up offboarding records
+                try:
+                    cursor.execute("DELETE FROM offboarding_checklist_item WHERE offboarding_id IN (SELECT id FROM offboarding_request WHERE employee_id = %s)", (emp_id,))
+                    cursor.execute("DELETE FROM offboarding_approval WHERE offboarding_id IN (SELECT id FROM offboarding_request WHERE employee_id = %s)", (emp_id,))
+                    cursor.execute("DELETE FROM offboarding_request WHERE employee_id = %s", (emp_id,))
+                except Exception as offboard_err:
+                    logger.warning(f"Could not delete offboarding_request for emp {emp_id}: {offboard_err}")
+
+                # Clean up onboarding records if this employee was a joinee
+                try:
+                    cursor.execute("DELETE FROM onboarding_declaration WHERE joinee_id IN (SELECT id FROM onboarding_joinee WHERE employee_id = %s)", (emp_id,))
+                    cursor.execute("DELETE FROM onboarding_document WHERE joinee_id IN (SELECT id FROM onboarding_joinee WHERE employee_id = %s)", (emp_id,))
+                    cursor.execute("DELETE FROM onboarding_history WHERE joinee_id IN (SELECT id FROM onboarding_joinee WHERE employee_id = %s)", (emp_id,))
+                    cursor.execute("DELETE FROM onboarding_joinee WHERE employee_id = %s", (emp_id,))
+                except Exception as onboard_err:
+                    logger.warning(f"Could not delete onboarding_joinee for emp {emp_id}: {onboard_err}")
+
+                # 3. Delete user account(s)
+                cursor.execute("""
+                    DELETE FROM users 
+                    WHERE employee_id = %s OR employee_name = %s 
+                       OR (username = %s AND %s IS NOT NULL AND %s != '')
+                """, (emp_id, emp_name, emp_email, emp_email, emp_email))
+
+                # 4. Delete root employee record
+                cursor.execute("DELETE FROM employee WHERE id = %s", (emp_id,))
+
+                # 5. Audit log
+                try:
+                    cursor.execute("""
+                        INSERT INTO audit_logs (user_id, event_type, description)
+                        VALUES (%s, %s, %s)
+                    """, (
+                        current_user.get("user_id", 0),
+                        "employee_deleted",
+                        f"{current_user.get('role', 'User').upper()} '{current_user['employee_name']}' deleted employee ID {emp_id} ({emp_name})."
+                    ))
+                except Exception:
+                    pass
+
+            finally:
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+
+        logger.info(f"Successfully processed deletion for {emp_name}")
         return jsonify({
             "success": True, 
-            "message": f"Employee {emp_name} and all associated data have been permanently deleted."
+            "message": f"Employee {emp_name} has been successfully deleted."
         }), 200
 
     except Exception as e:
         logger.error(f"Error deleting employee {emp_id}: {str(e)}", exc_info=True)
-        return jsonify({"success": False, "error": "Internal server error"}), 500
+        return jsonify({"success": False, "error": f"Failed to delete employee: {str(e)}"}), 500
 
 
 @employee_bp.route("/<int:emp_id>/role", methods=["PUT", "PATCH"])
