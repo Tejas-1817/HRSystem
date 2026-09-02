@@ -255,7 +255,7 @@ def get_my_gear(current_user):
     return jsonify({"success": True, "devices": devices}), 200
 
 @device_bp.route("/employee/<employee_name>", methods=["GET"])
-@role_required(["hr", "manager", "admin"])
+@role_required(["hr", "manager", "admin", "superadmin"])
 def get_devices_for_employee(current_user, employee_name):
     """Return all currently-assigned devices for a specific employee.
     Accessible by HR, Manager, and Admin — unlike GET /devices/ which is HR-only

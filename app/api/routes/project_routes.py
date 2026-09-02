@@ -4,6 +4,7 @@ from app.api.middleware.auth import token_required, role_required
 from app.utils.helpers import generate_project_id
 from app.services.billing_service import sync_employee_status
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 project_bp = Blueprint('projects', __name__)
@@ -82,27 +83,46 @@ def _resolve_manager_name_from_payload(data):
 
 
 @project_bp.route("/employee/<employee_name>", methods=["GET"])
-@role_required(["hr", "manager", "admin"])
+@role_required(["hr", "manager", "admin", "superadmin"])
 def get_employee_projects(current_user, employee_name):
     """Return active projects for a specific employee (for profile page view)."""
     from urllib.parse import unquote
-    name = unquote(employee_name)
+    identifier = unquote(employee_name or '').strip()
+    if not identifier:
+        return jsonify({"success": True, "projects": []}), 200
+
     try:
+        emp_match = execute_single(
+            "SELECT id, name, original_name FROM employee WHERE id = %s OR name = %s OR original_name = %s",
+            (identifier, identifier, identifier)
+        )
+        names = {identifier}
+        if emp_match:
+            if emp_match.get("name"):
+                names.add(emp_match["name"])
+                clean = re.sub(r'^[A-Z]_', '', emp_match["name"])
+                names.add(clean)
+            if emp_match.get("original_name"):
+                names.add(emp_match["original_name"])
+            names.add(str(emp_match["id"]))
+
+        placeholders = ", ".join(["%s"] * len(names))
         select_cols = _project_select_columns()
         manager_join = _manager_join_clause()
         rows = execute_query(
             f"""
             SELECT DISTINCT {select_cols}
             FROM projects p
-            INNER JOIN project_assignments pa ON p.id = pa.project_id
+            LEFT JOIN project_assignments pa ON p.id = pa.project_id
             {manager_join}
-            WHERE pa.employee_name = %s AND pa.status = 'active'
+            WHERE (pa.employee_name IN ({placeholders}) OR p.manager_name IN ({placeholders}))
+              AND (p.status IS NULL OR p.status != 'completed')
             """,
-            (name,),
+            tuple(names) + tuple(names),
         )
         return jsonify({"success": True, "projects": serialize_projects(rows)}), 200
     except Exception as e:
-        logger.error(f"Error fetching projects for employee {name}: {e}", exc_info=True)
+        logger.error(f"Error fetching projects for employee {identifier}: {e}", exc_info=True)
         return jsonify({"success": False, "error": "Failed to fetch employee projects"}), 500
 
 

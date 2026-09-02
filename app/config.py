@@ -1,7 +1,8 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+load_dotenv(os.path.join(basedir, ".env"), override=True)
 
 class Config:
     DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
@@ -31,8 +32,8 @@ class Config:
     @staticmethod
     def get_db_config():
         return {
-            "host": Config.DB_HOST,
-            "database": Config.DB_NAME,
-            "user": Config.DB_USER,
-            "password": Config.DB_PASS
+            "host": os.getenv("DB_HOST", Config.DB_HOST),
+            "database": os.getenv("DB_NAME", Config.DB_NAME),
+            "user": os.getenv("DB_USER", Config.DB_USER),
+            "password": os.getenv("DB_PASS", Config.DB_PASS)
         }

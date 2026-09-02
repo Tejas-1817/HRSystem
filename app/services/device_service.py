@@ -1,6 +1,7 @@
 from app.models.database import execute_query, execute_single, Transaction
 from datetime import datetime
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -512,14 +513,36 @@ def add_device_image(device_id: int, image_url: str) -> int:
 
 
 def get_employee_devices(employee_name: str) -> list:
-    """Get currently assigned devices for an employee, including acceptance status."""
-    rows = execute_query("""
+    """Get currently assigned devices for an employee, resolving aliases and ID."""
+    from app.models.database import execute_single
+    identifier = str(employee_name or '').strip()
+    if not identifier:
+        return []
+
+    # Resolve all employee aliases (ID, name, original_name, role-stripped name)
+    emp = execute_single(
+        "SELECT id, name, original_name FROM employee WHERE id = %s OR name = %s OR original_name = %s",
+        (identifier, identifier, identifier)
+    )
+    names = {identifier}
+    if emp:
+        if emp.get("name"):
+            names.add(emp["name"])
+            clean = re.sub(r'^[A-Z]_', '', emp["name"])
+            names.add(clean)
+        if emp.get("original_name"):
+            names.add(emp["original_name"])
+        names.add(str(emp["id"]))
+
+    placeholders = ", ".join(["%s"] * len(names))
+    rows = execute_query(f"""
         SELECT d.*, da.id AS assignment_id, da.acceptance_status,
                da.accepted_at, da.assigned_date
         FROM devices d
         JOIN device_assignments da ON d.id = da.device_id
-        WHERE da.employee_name = %s AND da.returned_date IS NULL
-    """, (employee_name,))
+        WHERE da.employee_name IN ({placeholders}) AND da.returned_date IS NULL
+          AND (d.is_deleted = FALSE OR d.is_deleted IS NULL)
+    """, tuple(names))
     
     for r in rows:
         for k, v in r.items():
