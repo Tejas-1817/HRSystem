@@ -7,7 +7,7 @@ import hashlib
 from datetime import datetime, timedelta
 from app.config import Config
 from app.models.database import get_connection, execute_query, execute_single, Transaction
-from app.api.middleware.auth import token_required, role_required, onboarding_required, permission_required, superadmin_required
+from app.api.middleware.auth import token_required, role_required, onboarding_required, permission_required, superadmin_required, get_role_permissions_summary
 from app.utils.helpers import generate_unique_username, cascade_rename_employee, log_audit_event
 from app.services.leave_service import allocate_default_leaves
 from app.services.employee_service import create_employee_record, update_employee_role
@@ -150,17 +150,38 @@ def login():
             **onboarding_response,
         }
 
+        # Include dynamic permissions summary for the user's role
+        perm_summary = get_role_permissions_summary(user["role"])
+
         return jsonify({
             "success": True,
             "message": "Login successful",
             "token": token,
             "user": response_user,
+            "permissions": perm_summary.get("permissions", {}),
+            "feature_actions": perm_summary.get("feature_actions", {}),
         }), 200
     except mysql.connector.Error as db_err:
         logger.error(f"Database error during login: {db_err}")
         return jsonify({"success": False, "error": "Service temporarily unavailable. Please try again later."}), 503
     except Exception as e:
         logger.error(f"Unexpected error during login: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+@auth_bp.route("/permissions", methods=["GET"])
+@token_required
+def get_user_permissions(current_user):
+    """Return the dynamic permissions and feature actions for the authenticated user's role."""
+    try:
+        perm_summary = get_role_permissions_summary(current_user["role"])
+        return jsonify({
+            "success": True,
+            "role": current_user["role"],
+            "permissions": perm_summary.get("permissions", {}),
+            "feature_actions": perm_summary.get("feature_actions", {}),
+        }), 200
+    except Exception as e:
+        logger.error(f"Error fetching user permissions: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 @auth_bp.route("/change-password", methods=["POST"])

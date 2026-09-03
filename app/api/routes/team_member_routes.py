@@ -236,7 +236,7 @@ def get_single_team_member(current_user, team_member_id):
 
 
 @team_member_bp.route("", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"], permission_key="team_members.create")
 def create_new_team_member(current_user):
     """
     Create a new team member.
@@ -327,7 +327,7 @@ def create_new_team_member(current_user):
 
 
 @team_member_bp.route("/<int:team_member_id>", methods=["PATCH"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"], permission_key="team_members.update")
 def update_single_team_member(current_user, team_member_id):
     """
     Update team member information.
@@ -392,7 +392,7 @@ def update_single_team_member(current_user, team_member_id):
 
 
 @team_member_bp.route("/<int:team_member_id>", methods=["DELETE"])
-@role_required(["admin"])
+@role_required(["admin", "superadmin", "hr"], permission_key="team_members.delete")
 def delete_single_team_member(current_user, team_member_id):
     """
     Delete a team member (soft delete for audit trail).

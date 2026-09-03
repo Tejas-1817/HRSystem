@@ -79,7 +79,7 @@ def _build_profile_query():
             COALESCE(util.total_utilization, 0)                        AS total_utilization,
             GREATEST(0, 100 - COALESCE(util.total_utilization, 0))     AS remaining_availability
         FROM employee e
-        LEFT JOIN users u ON e.name = u.employee_name
+        LEFT JOIN users u ON (e.name = u.employee_name OR e.id = u.employee_id)
         LEFT JOIN (
             SELECT employee_name,
                    SUM(total_leaves)              AS total,
@@ -96,7 +96,7 @@ def _build_profile_query():
             WHERE p.status NOT IN ('completed', 'closed', 'cancelled')
             GROUP BY pa.employee_name
         ) util ON e.name = util.employee_name
-        WHERE e.name = %s
+        WHERE e.name = %s OR u.username = %s OR u.employee_name = %s
         LIMIT 1
     """
 
@@ -152,7 +152,7 @@ def _can_view(current_user: dict, target_employee_name: str) -> bool:
     role = current_user.get("role", "")
     requester_name = current_user.get("employee_name", "")
 
-    if role in ("admin", "hr"):
+    if role in ("admin", "hr", "superadmin"):
         return True
 
     # Own profile is always visible
@@ -236,7 +236,7 @@ def get_team_member_profile(current_user, employee_name_raw):
 
     # ── 3. Fetch profile record ────────────────────────────────────────────
     try:
-        profile = execute_single(_build_profile_query(), (employee_name,))
+        profile = execute_single(_build_profile_query(), (employee_name, employee_name, employee_name))
     except Exception as exc:
         logger.error(
             "Database error fetching profile for '%s': %s",

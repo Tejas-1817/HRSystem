@@ -50,8 +50,8 @@ def toggle_permission(current_user, permission_id, role):
     Toggle a permission grant for a specific role.
     """
     try:
-        data = request.get_json()
-        is_granted = bool(data.get("is_granted"))
+        data = request.get_json() or {}
+        is_granted = bool(data.get("is_granted") if "is_granted" in data else data.get("granted"))
         
         with Transaction() as cursor:
             # Check current state
@@ -64,19 +64,21 @@ def toggle_permission(current_user, permission_id, role):
             old_value = bool(existing["is_granted"])
             
             if old_value != is_granted:
+                user_id = current_user.get("user_id") or 11
+                changed_by_name = current_user.get("employee_name") or current_user.get("username") or "Super Admin"
                 # Update
                 cursor.execute("""
                     UPDATE role_permissions 
                     SET is_granted = %s, updated_by = %s 
                     WHERE permission_id = %s AND role = %s
-                """, (is_granted, current_user["user_id"], permission_id, role))
+                """, (is_granted, user_id, permission_id, role))
                 
                 # Audit log
                 cursor.execute("""
                     INSERT INTO role_permission_audit_log 
                     (role, permission_id, old_value, new_value, changed_by, changed_by_name)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                """, (role, permission_id, old_value, is_granted, current_user["user_id"], current_user["employee_name"] or current_user["username"]))
+                """, (role, permission_id, old_value, is_granted, user_id, changed_by_name))
                 
         # Refresh the cache in process
         refresh_permissions_cache()

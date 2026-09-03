@@ -120,7 +120,7 @@ def serialize_employee(rows):
 
 
 @employee_bp.route("/<int:emp_id>/allocation-config", methods=["PATCH"])
-@role_required(["hr", "manager"])
+@role_required(["hr", "manager", "admin", "superadmin"], permission_key="employees.allocation_config")
 def update_allocation_config(current_user, emp_id):
     """
     Allow HR/Managers to enable/disable over-allocation for an employee.
@@ -302,7 +302,7 @@ def get_employee(current_user, emp_id):
         return jsonify({"success": False, "error": "Failed to fetch employee details"}), 500
 
 @employee_bp.route("/", methods=["POST"], strict_slashes=False)
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"], permission_key="employees.create")
 def add_employee(current_user):
     try:
         # Support both form-data (multipart) and JSON requests
@@ -353,13 +353,15 @@ def add_employee(current_user):
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 @employee_bp.route("/<int:emp_id>", methods=["PUT", "PATCH"])
-@role_required(["hr", "admin", "superadmin"])
+@role_required(["hr", "admin", "superadmin"], permission_key="employees.update")
 def update_employee(current_user, emp_id):
     """
     Update an existing employee's details.
     """
     try:
         data = request.get_json(silent=True) or {}
+        if not data and request.form:
+            data = request.form.to_dict()
 
         # ── 1. Verify employee exists ──────────────────────────────────────
         existing = execute_single(
@@ -581,7 +583,7 @@ def update_employee(current_user, emp_id):
 
 
 @employee_bp.route("/<int:emp_id>", methods=["DELETE"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"], permission_key="employees.delete")
 def delete_employee(current_user, emp_id):
     try:
         # 1. Fetch employee details first

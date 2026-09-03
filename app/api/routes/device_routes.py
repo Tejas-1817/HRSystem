@@ -24,7 +24,7 @@ from datetime import datetime
 device_bp = Blueprint("devices", __name__)
 
 @device_bp.route("/", methods=["GET"], strict_slashes=False)
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"], permission_key="devices.view_all")
 def get_all_devices(current_user):
     filters = {
         "status": request.args.get("status"),
@@ -36,7 +36,7 @@ def get_all_devices(current_user):
     return jsonify({"success": True, "devices": devices, "count": len(devices)}), 200
 
 @device_bp.route("/export", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"], permission_key="devices.export")
 def export_devices(current_user):
     """
     Export Asset Inventory to Excel format.
@@ -62,21 +62,18 @@ def export_devices(current_user):
             "sort_order": request.args.get("sort_order")
         }
 
-        # Fetch filtered/sorted devices
-        devices = list_devices(filters)
+        # Run export logic
+        excel_data = generate_assets_excel(filters)
 
-        if not devices:
-            return jsonify({"success": False, "error": "No assets match the selected filters."}), 404
+        # Audit log
+        audit_desc = f"Exported assets to Excel"
+        if any(filters.values()):
+            applied_filters = [f"{k}={v}" for k, v in filters.items() if v]
+            audit_desc += f" with filters: {', '.join(applied_filters)}"
 
-        # Generate Excel
-        generated_by_name = current_user.get("employee_name", "System")
-        excel_data = generate_assets_excel(devices, generated_by_name)
-
-        # Log audit event
-        audit_desc = f"Exported {len(devices)} assets to Excel. Filters applied: {filters}"
         log_audit_event(
-            user_id=current_user.get("user_id") or current_user.get("id"),
-            event_type="asset_inventory_export",
+            user_id=current_user["user_id"],
+            event_type="asset_export",
             description=audit_desc
         )
 
@@ -93,7 +90,7 @@ def export_devices(current_user):
         return jsonify({"success": False, "error": f"Failed to export assets: {str(e)}"}), 500
 
 @device_bp.route("/", methods=["POST"], strict_slashes=False)
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"], permission_key="devices.create")
 def add_device(current_user):
     data = request.get_json() or {}
     required = ["brand", "model", "serial_number"]
