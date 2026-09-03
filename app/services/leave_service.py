@@ -14,11 +14,13 @@ from app.models.database import execute_query, execute_single
 
 # Role hierarchy: who can approve whose leave
 # Format: { requester_role: [allowed_approver_roles] }
+# Role hierarchy: who can approve whose leave
+# Format: { requester_role: [allowed_approver_roles] }
 _APPROVAL_MATRIX = {
-    "employee":    ["manager", "hr", "admin", "superadmin"],
-    "team_member": ["manager", "hr", "admin", "superadmin"],
-    "intern":      ["manager", "hr", "admin", "superadmin"],
-    "consultant":  ["manager", "hr", "admin", "superadmin"],
+    "employee":    ["manager", "admin", "superadmin"],
+    "team_member": ["manager", "admin", "superadmin"],
+    "intern":      ["manager", "admin", "superadmin"],
+    "consultant":  ["manager", "admin", "superadmin"],
     "hr":          ["admin", "superadmin"],
     "manager":     ["admin", "superadmin"],
     "admin":       ["superadmin"],
@@ -29,19 +31,14 @@ _APPROVAL_MATRIX = {
 def validate_approval_authority(approver: dict, leave: dict) -> dict:
     """
     Enforce the role-based leave approval hierarchy.
+    HR is strictly view-only for leaves and cannot approve/reject any leave.
+    Manager can only approve team members reporting to them.
+    Admin / Superadmin can approve all other users (except themselves).
+    Self-approval is strictly forbidden.
     """
     approver_name = (approver.get("employee_name") or "").strip()
     approver_role = str(approver.get("role", "")).lower().strip()
     requester_name = (leave.get("employee_name") or "").strip()
-
-    # ── Fetch requester role (use stored snapshot if available, else query) ──
-    requester_role = str(leave.get("requester_role") or "").lower().strip()
-    if not requester_role:
-        user_row = execute_single(
-            "SELECT role FROM users WHERE employee_name = %s LIMIT 1",
-            (requester_name,)
-        )
-        requester_role = str(user_row["role"] if user_row else "employee").lower().strip()
 
     # ── Self-approval block ──────────────────────────────────────────────────
     if approver_name and requester_name and approver_name.lower() == requester_name.lower():
@@ -51,26 +48,61 @@ def validate_approval_authority(approver: dict, leave: dict) -> dict:
             "code": 403,
         }
 
-    # ── Admin/Superadmin bypass: can approve everyone except themselves ───────────
-    if approver_role in ("admin", "superadmin"):
-        return {"ok": True}
-
-    # ── Lookup allowed approvers for this requester's role ───────────────────
-    allowed = _APPROVAL_MATRIX.get(requester_role, ["manager", "hr", "admin", "superadmin"])
-    if approver_role not in allowed:
-        role_label = requester_role.title()
-        allowed_label = " or ".join(r.title() for r in allowed) if allowed else "No one"
+    # ── HR is strictly view-only for leave approvals ─────────────────────────
+    if approver_role == "hr":
         return {
             "ok": False,
-            "error": (
-                f"Unauthorized leave approval action. "
-                f"{role_label} leave requests can only be approved by: {allowed_label}. "
-                f"Your role ({approver_role.title()}) does not have this permission."
-            ),
+            "error": "HR has view-only access to leave applications and cannot approve or reject leaves.",
             "code": 403,
         }
 
-    return {"ok": True}
+    # ── Admin/Superadmin bypass: can approve everyone except themselves ───────
+    if approver_role in ("admin", "superadmin"):
+        return {"ok": True}
+
+    # ── Fetch requester role ──
+    requester_role = str(leave.get("requester_role") or "").lower().strip()
+    if not requester_role:
+        user_row = execute_single(
+            "SELECT role FROM users WHERE employee_name = %s LIMIT 1",
+            (requester_name,)
+        )
+        requester_role = str(user_row["role"] if user_row else "employee").lower().strip()
+
+    # ── Manager approval checks ──
+    if approver_role == "manager":
+        if requester_role in ("hr", "manager", "admin", "superadmin"):
+            return {
+                "ok": False,
+                "error": f"Managers cannot approve {requester_role.upper()} leaves. Only Admin or Super Admin can approve {requester_role.upper()} leaves.",
+                "code": 403,
+            }
+        # Check team member reporting
+        is_team_member = execute_single(
+            """
+            SELECT 1 AS ok
+            FROM project_assignments pa
+            JOIN projects p ON p.id = pa.project_id
+            WHERE pa.employee_name = %s
+              AND p.manager_name = %s
+              AND p.status NOT IN ('completed', 'closed', 'cancelled')
+            LIMIT 1
+            """,
+            (requester_name, approver_name),
+        )
+        if not is_team_member:
+            return {
+                "ok": False,
+                "error": "You can only approve leaves for team members reporting to you.",
+                "code": 403,
+            }
+        return {"ok": True}
+
+    return {
+        "ok": False,
+        "error": f"Unauthorized role '{approver_role}'. Access denied.",
+        "code": 403,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +162,8 @@ def get_employee_project_managers(employee_name: str) -> list[dict]:
 
 def create_leave_signoffs(leave_id: int, employee_name: str, applicant_role: str = None) -> list[dict]:
     """
-    Generate required multi-signoffs when a leave application is created:
-      - Team Member (role: employee) -> 1 HR signoff + 1 signoff per assigned project manager.
+    Generate required signoffs when a leave application is created:
+      - Team Member (role: employee) -> Signoff per assigned project manager (or Admin if none assigned).
       - Non-employee (Manager/HR) -> 1 Admin signoff.
     """
     _ensure_leave_signoffs_table()
@@ -144,23 +176,24 @@ def create_leave_signoffs(leave_id: int, employee_name: str, applicant_role: str
 
     try:
         if applicant_role_norm in ("employee", "team_member", "intern", "consultant"):
-            # 1. HR Signoff required
-            execute_query("""
-                INSERT INTO leave_signoffs (leave_id, approver_role, approver_name, project_name, status)
-                VALUES (%s, 'hr', NULL, NULL, 'pending')
-            """, (leave_id,), commit=True)
-            created.append({"approver_role": "hr", "approver_name": None, "project_name": None})
-
-            # 2. All assigned project managers
+            # All assigned project managers
             mgrs = get_employee_project_managers(employee_name)
-            for m in mgrs:
+            if mgrs:
+                for m in mgrs:
+                    execute_query("""
+                        INSERT INTO leave_signoffs (leave_id, approver_role, approver_name, project_name, status)
+                        VALUES (%s, 'manager', %s, %s, 'pending')
+                    """, (leave_id, m["manager_name"], m["project_name"]), commit=True)
+                    created.append({"approver_role": "manager", "approver_name": m["manager_name"], "project_name": m["project_name"]})
+            else:
+                # Fallback to Admin if no manager assigned
                 execute_query("""
                     INSERT INTO leave_signoffs (leave_id, approver_role, approver_name, project_name, status)
-                    VALUES (%s, 'manager', %s, %s, 'pending')
-                """, (leave_id, m["manager_name"], m["project_name"]), commit=True)
-                created.append({"approver_role": "manager", "approver_name": m["manager_name"], "project_name": m["project_name"]})
+                    VALUES (%s, 'admin', NULL, NULL, 'pending')
+                """, (leave_id,), commit=True)
+                created.append({"approver_role": "admin", "approver_name": None, "project_name": None})
         else:
-            # Non-employee: Admin signoff
+            # Non-employee (HR / Manager): Admin signoff
             execute_query("""
                 INSERT INTO leave_signoffs (leave_id, approver_role, approver_name, project_name, status)
                 VALUES (%s, 'admin', NULL, NULL, 'pending')
@@ -205,19 +238,17 @@ def process_leave_signoff(leave: dict, current_user: dict, action: str, comments
     approver_role = str(current_user.get("role", "")).lower().strip()
     applicant_name = (leave.get("employee_name") or "").strip()
 
-    if approver_name and applicant_name and approver_name.lower() == applicant_name.lower():
-        return {"ok": False, "error": "Self-approval is not permitted.", "code": 403}
+    # Validate authority
+    auth_check = validate_approval_authority(current_user, leave)
+    if not auth_check["ok"]:
+        return auth_check
 
     signoffs = get_leave_signoffs(leave_id)
     
-    # Auto-heal: verify signoffs match target employee's actual role
-    user_row = execute_single("SELECT role FROM users WHERE employee_name = %s LIMIT 1", (applicant_name,))
-    applicant_role = str(user_row["role"] if user_row else (leave.get("requester_role") or "employee")).lower().strip()
-    is_emp = applicant_role in ("employee", "team_member", "intern", "consultant")
-    has_hr = any(str(s.get("approver_role", "")).lower() == "hr" for s in signoffs)
-
-    if not signoffs or (is_emp and not has_hr):
-        execute_query("DELETE FROM leave_signoffs WHERE leave_id = %s", (leave_id,), commit=True)
+    # Auto-heal: verify signoffs exist
+    if not signoffs:
+        user_row = execute_single("SELECT role FROM users WHERE employee_name = %s LIMIT 1", (applicant_name,))
+        applicant_role = str(user_row["role"] if user_row else (leave.get("requester_role") or "employee")).lower().strip()
         create_leave_signoffs(leave_id, applicant_name, applicant_role)
         signoffs = get_leave_signoffs(leave_id)
 
@@ -225,8 +256,6 @@ def process_leave_signoff(leave: dict, current_user: dict, action: str, comments
     matched_ids = []
     if approver_role in ("admin", "superadmin"):
         matched_ids = [s["id"] for s in signoffs if str(s.get("status", "")).lower() == "pending"]
-    elif approver_role == "hr":
-        matched_ids = [s["id"] for s in signoffs if str(s.get("approver_role", "")).lower() == "hr" and str(s.get("status", "")).lower() == "pending"]
     elif approver_role == "manager":
         from app.api_helpers import names_match
         matched_ids = [

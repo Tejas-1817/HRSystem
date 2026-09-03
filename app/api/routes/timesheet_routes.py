@@ -719,6 +719,125 @@ def delete_timesheet(current_user, entry_id):
 
 
 # ---------------------------------------------------------------------------
+# POST /timesheets/bulk-delete — delete multiple selected timesheet entries
+# ---------------------------------------------------------------------------
+
+@timesheet_bp.route("/bulk-delete", methods=["POST"])
+@token_required
+def bulk_delete_timesheets(current_user):
+    try:
+        data = request.get_json() or {}
+        ids = data.get("ids") or []
+        if not ids:
+            return jsonify({"success": False, "error": "No timesheet IDs provided"}), 400
+
+        deleted_count = 0
+        skipped_count = 0
+        for entry_id in ids:
+            try:
+                row = execute_single("SELECT * FROM timesheets WHERE id = %s", (entry_id,))
+                if not row:
+                    skipped_count += 1
+                    continue
+
+                if current_user["role"] == "employee":
+                    if row["employee_name"] != current_user["employee_name"]:
+                        skipped_count += 1
+                        continue
+                    if row["status"] not in ("submitted", "draft", "rejected"):
+                        skipped_count += 1
+                        continue
+
+                execute_query("DELETE FROM timesheets WHERE id = %s", (entry_id,), commit=True)
+                deleted_count += 1
+            except Exception as del_err:
+                skipped_count += 1
+
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "skipped_count": skipped_count,
+            "message": f"{deleted_count} timesheet(s) deleted successfully."
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# POST /timesheets/bulk-approve — approve multiple selected timesheet entries
+# ---------------------------------------------------------------------------
+
+@timesheet_bp.route("/bulk-approve", methods=["POST"])
+@token_required
+def bulk_approve_timesheets(current_user):
+    try:
+        data = request.get_json() or {}
+        ids = data.get("ids") or []
+        comments = data.get("comments") or data.get("manager_comments")
+        if not ids:
+            return jsonify({"success": False, "error": "No timesheet IDs provided"}), 400
+
+        approved_count = 0
+        failed_entries = []
+        for entry_id in ids:
+            try:
+                result = svc_approve(current_user, int(entry_id), comments)
+                if result.get("success"):
+                    approved_count += 1
+                else:
+                    failed_entries.append({"id": entry_id, "error": result.get("error")})
+            except Exception as app_err:
+                failed_entries.append({"id": entry_id, "error": str(app_err)})
+
+        return jsonify({
+            "success": True,
+            "approved_count": approved_count,
+            "failed_count": len(failed_entries),
+            "failed_entries": failed_entries,
+            "message": f"{approved_count} timesheet(s) approved successfully."
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# POST /timesheets/bulk-reject — reject multiple selected timesheet entries
+# ---------------------------------------------------------------------------
+
+@timesheet_bp.route("/bulk-reject", methods=["POST"])
+@token_required
+def bulk_reject_timesheets(current_user):
+    try:
+        data = request.get_json() or {}
+        ids = data.get("ids") or []
+        reason = data.get("reason") or data.get("comments") or data.get("manager_comments") or "Bulk rejected by manager"
+        if not ids:
+            return jsonify({"success": False, "error": "No timesheet IDs provided"}), 400
+
+        rejected_count = 0
+        failed_entries = []
+        for entry_id in ids:
+            try:
+                result = svc_reject(current_user, int(entry_id), reason, reason)
+                if result.get("success"):
+                    rejected_count += 1
+                else:
+                    failed_entries.append({"id": entry_id, "error": result.get("error")})
+            except Exception as rej_err:
+                failed_entries.append({"id": entry_id, "error": str(rej_err)})
+
+        return jsonify({
+            "success": True,
+            "rejected_count": rejected_count,
+            "failed_count": len(failed_entries),
+            "failed_entries": failed_entries,
+            "message": f"{rejected_count} timesheet(s) rejected successfully."
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
 # PATCH /timesheets/<id>/review — canonical review endpoint (RBAC in service)
 # ---------------------------------------------------------------------------
 

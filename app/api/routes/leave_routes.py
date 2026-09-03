@@ -315,7 +315,10 @@ def view_leaves(current_user):
             tuple(params + [page_size, offset]),
         )
 
-        rows = [_serialize_leave(r) for r in rows]
+        for r in rows:
+            _serialize_leave(r)
+            r["signoffs"] = get_leave_signoffs(r["id"])
+
         return jsonify({
             "success": True,
             "page": page,
@@ -364,7 +367,9 @@ def get_leave_by_id(current_user, leave_id):
         if not _can_view_leave(current_user, row):
             return jsonify({"success": False, "error": "Access denied"}), 403
 
-        return jsonify({"success": True, "leave": _serialize_leave(row)}), 200
+        row = _serialize_leave(row)
+        row["signoffs"] = get_leave_signoffs(leave_id)
+        return jsonify({"success": True, "leave": row}), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -874,7 +879,20 @@ def apply_leave(current_user):
                 )
             }), 400
 
-        # ── Insert leave record (with reque        # ── Fetch the new leave id ────────────────────────────────────────
+        # ── Insert leave record (with requester_role) ─────────────────────
+        execute_query("""
+            INSERT INTO leaves (
+                employee_name, leave_type, leave_type_category,
+                half_day_period, leave_duration, start_date, end_date,
+                reason, status, applied_at, requester_role
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW(), %s)
+        """, (
+            employee_name, leave_type, leave_type_category,
+            half_day_period, float(duration), start_date, end_date,
+            data.get("reason", ""), current_user["role"]
+        ), commit=True)
+
+        # ── Fetch the new leave id ────────────────────────────────────────
         new_leave = execute_single(
             "SELECT id FROM leaves WHERE employee_name=%s ORDER BY applied_at DESC LIMIT 1",
             (employee_name,)
@@ -1167,5 +1185,35 @@ def get_leave_history(current_user, leave_id):
                 r["created_at"] = r["created_at"].isoformat()
                 
         return jsonify({"success": True, "history": rows}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# DELETE /leaves/<id> — delete / cancel a leave application
+# ---------------------------------------------------------------------------
+
+@leave_bp.route("/<int:leave_id>", methods=["DELETE"])
+@token_required
+def delete_leave(current_user, leave_id):
+    try:
+        leave = execute_single("SELECT * FROM leaves WHERE id = %s", (leave_id,))
+        if not leave:
+            return jsonify({"success": False, "error": "Leave application not found"}), 404
+
+        is_own = leave["employee_name"] == current_user["employee_name"]
+        if not is_own and current_user["role"] not in ("admin", "superadmin", "manager"):
+            return jsonify({"success": False, "error": "Access denied"}), 403
+
+        # If leave was approved, refund balance
+        if leave["status"] == "approved":
+            duration = _get_stored_duration(leave)
+            refund_leave_balance(leave["employee_name"], leave["leave_type"], duration)
+
+        execute_query("DELETE FROM leave_signoffs WHERE leave_id = %s", (leave_id,), commit=True)
+        execute_query("DELETE FROM leave_approval_history WHERE leave_id = %s", (leave_id,), commit=True)
+        execute_query("DELETE FROM leaves WHERE id = %s", (leave_id,), commit=True)
+
+        return jsonify({"success": True, "message": "Leave application deleted successfully"}), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
