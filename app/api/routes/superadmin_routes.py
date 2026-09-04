@@ -119,7 +119,7 @@ def reset_defaults(current_user):
                 perm_id = p_id_res["id"]
                 
                 for r in roles_to_reset:
-                    is_granted = r in granted_roles
+                    is_granted = (r == 'superadmin') or (r in granted_roles)
                     
                     cursor.execute("SELECT is_granted FROM role_permissions WHERE permission_id = %s AND role = %s", (perm_id, r))
                     existing = cursor.fetchone()
@@ -137,6 +137,11 @@ def reset_defaults(current_user):
                                 (role, permission_id, old_value, new_value, changed_by, changed_by_name)
                                 VALUES (%s, %s, %s, %s, %s, %s)
                             """, (r, perm_id, old_value, is_granted, current_user["user_id"], current_user["employee_name"] or current_user["username"]))
+                    else:
+                        cursor.execute("""
+                            INSERT INTO role_permissions (role, permission_id, is_granted, updated_by)
+                            VALUES (%s, %s, %s, %s)
+                        """, (r, perm_id, is_granted, current_user["user_id"]))
 
         refresh_permissions_cache()
         

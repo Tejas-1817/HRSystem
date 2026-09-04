@@ -149,21 +149,24 @@ def _can_view(current_user: dict, target_employee_name: str) -> bool:
     """
     Return True if the requesting user is authorised to view this profile.
 
-      admin / hr / superadmin → always
-      manager                 → if the target is on one of their projects or managed by them
-      others                  → only their own profile
+      - Own profile is always visible
+      - If user has employee_team_management view permission (superadmin, admin, hr) → can view
+      - manager → if the target is on one of their projects or managed by them
+      - others → only their own profile
     """
+    from app.api.middleware.auth import has_permission
     role = str(current_user.get("role", "")).lower().strip()
     requester_name = current_user.get("employee_name", "")
-
-    if role in ("admin", "hr", "superadmin"):
-        return True
 
     # Own profile is always visible
     if (requester_name and target_employee_name and (
         requester_name.lower() == target_employee_name.lower() or
         _clean_name(requester_name) == _clean_name(target_employee_name)
     )):
+        return True
+
+    # Dynamic permission evaluation (Access Control)
+    if has_permission(current_user, "employee_team_management", "view") or has_permission(current_user, "employees", "view") or has_permission(current_user, "team_members", "view"):
         return True
 
     if role == "manager":

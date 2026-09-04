@@ -94,7 +94,7 @@ SEED_PERMISSIONS = [
     ("team_members.allocation_config", "team_members", "Update Team Member Allocation Config", "PATCH /<id>/allocation-config", ["hr", "manager", "admin"]),
 ]
 
-CONFIGURABLE_ROLES = ['admin', 'hr', 'manager', 'employee', 'team_member', 'onboarding_candidate']
+CONFIGURABLE_ROLES = ['superadmin', 'admin', 'hr', 'manager', 'employee', 'team_member', 'onboarding_candidate']
 
 def run_migration():
     try:
@@ -123,7 +123,7 @@ def run_migration():
                 
                 # Insert role_permissions for all configurable roles
                 for role in CONFIGURABLE_ROLES:
-                    is_granted = role in granted_roles
+                    is_granted = (role == 'superadmin') or (role in granted_roles)
                     cursor.execute("""
                         INSERT IGNORE INTO role_permissions (role, permission_id, is_granted)
                         VALUES (%s, %s, %s)

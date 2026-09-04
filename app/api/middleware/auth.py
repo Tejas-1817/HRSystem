@@ -79,15 +79,15 @@ def token_required(f):
 FEATURE_PERMISSION_MAP = {
     # 1. Employee & Team Management
     "employee_team_management": {
-        "view": ["employees.allocation_config", "team_members.allocation_config", "employees.create", "team_members.create", "employees.update", "team_members.update"],
+        "view": ["employees.allocation_config", "team_members.allocation_config"],
         "manage": ["employees.create", "employees.update", "employees.delete", "team_members.create", "team_members.update", "team_members.delete"],
     },
     "employees": {
-        "view": ["employees.allocation_config", "team_members.allocation_config", "employees.create", "team_members.create", "employees.update", "team_members.update"],
+        "view": ["employees.allocation_config", "team_members.allocation_config"],
         "manage": ["employees.create", "employees.update", "employees.delete", "team_members.create", "team_members.update", "team_members.delete"],
     },
     "team_members": {
-        "view": ["employees.allocation_config", "team_members.allocation_config", "employees.create", "team_members.create", "employees.update", "team_members.update"],
+        "view": ["employees.allocation_config", "team_members.allocation_config"],
         "manage": ["employees.create", "employees.update", "employees.delete", "team_members.create", "team_members.update", "team_members.delete"],
     },
     # 2. Departments
