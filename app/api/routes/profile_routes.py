@@ -141,28 +141,49 @@ def _get_leave_breakdown(employee_name: str):
 
 # ── RBAC helper ────────────────────────────────────────────────────────────
 
+def _clean_name(name: str) -> str:
+    return re.sub(r'^[A-Z]_', '', (name or '').strip()).lower()
+
+
 def _can_view(current_user: dict, target_employee_name: str) -> bool:
     """
     Return True if the requesting user is authorised to view this profile.
 
-      admin / hr   → always
-      manager      → only if the target is on one of their projects
-      others       → only their own profile
+      admin / hr / superadmin → always
+      manager                 → if the target is on one of their projects or managed by them
+      others                  → only their own profile
     """
-    role = current_user.get("role", "")
+    role = str(current_user.get("role", "")).lower().strip()
     requester_name = current_user.get("employee_name", "")
 
     if role in ("admin", "hr", "superadmin"):
         return True
 
     # Own profile is always visible
-    if requester_name == target_employee_name:
+    if (requester_name and target_employee_name and (
+        requester_name.lower() == target_employee_name.lower() or
+        _clean_name(requester_name) == _clean_name(target_employee_name)
+    )):
         return True
 
     if role == "manager":
-        # Manager can see team members who share a project with them
+        # Manager can see team members in projects they manage or share
         try:
             shared = execute_single(
+                """
+                SELECT 1 FROM project_assignments pa
+                JOIN projects p ON pa.project_id = p.id
+                WHERE (p.manager_name = %s OR p.manager_name = %s)
+                  AND (pa.employee_name = %s OR pa.employee_name = %s)
+                  AND p.status NOT IN ('completed', 'closed', 'cancelled')
+                LIMIT 1
+                """,
+                (requester_name, _clean_name(requester_name), target_employee_name, _clean_name(target_employee_name)),
+            )
+            if shared:
+                return True
+
+            shared_colleague = execute_single(
                 """
                 SELECT 1 FROM project_assignments pa_manager
                 JOIN project_assignments pa_target
@@ -173,7 +194,7 @@ def _can_view(current_user: dict, target_employee_name: str) -> bool:
                 """,
                 (requester_name, target_employee_name),
             )
-            return shared is not None
+            return shared_colleague is not None
         except Exception as exc:
             logger.warning("RBAC project check failed: %s", exc)
             return False
