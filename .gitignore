@@ -8,7 +8,6 @@ ENV/
 .env
 .env.*
 !.env.example
-!.env.production
 
 # Python Cache
 __pycache__/
@@ -30,4 +29,4 @@ app/static/uploads/
 .DS_Store
 
 # Deployment specific
-deployment/hrms_dump.sql
+deployment/
