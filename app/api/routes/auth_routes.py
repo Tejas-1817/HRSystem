@@ -93,10 +93,32 @@ def login():
         if not user:
             return jsonify({"success": False, "error": "Invalid email/username or password"}), 401
 
-        # Dual-read password: try password_hash first, fallback to password
-        stored_hash = user.get("password_hash") or user.get("password")
-        if not stored_hash or not check_password_hash(stored_hash, password):
+        # Dual-read password: check both password_hash and legacy password columns
+        valid_password = False
+        matched_col = None
+
+        if user.get("password_hash") and check_password_hash(user["password_hash"], password):
+            valid_password = True
+            matched_col = "password_hash"
+        elif user.get("password") and check_password_hash(user["password"], password):
+            valid_password = True
+            matched_col = "password"
+
+        if not valid_password:
             return jsonify({"success": False, "error": "Invalid email/username or password"}), 401
+
+        # Auto-sync password columns if one was matched and the other is out of sync or missing
+        try:
+            if "password_hash" in user and "password" in user:
+                if user.get("password_hash") != user.get("password"):
+                    target_hash = user.get(matched_col)
+                    execute_query(
+                        "UPDATE users SET password=%s, password_hash=%s WHERE id=%s",
+                        (target_hash, target_hash, user["id"]),
+                        commit=True
+                    )
+        except Exception as sync_err:
+            logger.warning(f"Auto-sync password hashes on login failed: {sync_err}")
 
         # JWT username = email (new), fallback to username (legacy)
         jwt_username = user.get("email") or user.get("username") or ""
@@ -199,19 +221,34 @@ def change_password(current_user):
         if len(new_password) < 8 or not re.search(r"[A-Z]", new_password) or not re.search(r"[@$!%*?&]", new_password):
             return jsonify({"success": False, "error": "Password requirements not met"}), 400
 
-        # 🔥 Password Reuse Prevention
-        user = execute_single("SELECT password FROM users WHERE id=%s", (current_user["user_id"],))
-        if check_password_hash(user["password"], new_password):
+        # 🔥 Password Reuse Prevention (check both password_hash and legacy password)
+        user = execute_single("SELECT * FROM users WHERE id=%s", (current_user["user_id"],))
+        if not user:
+            return jsonify({"success": False, "error": "User not found"}), 404
+
+        current_hash = user.get("password_hash") or user.get("password")
+        if current_hash and check_password_hash(current_hash, new_password):
             return jsonify({"success": False, "error": "New password cannot be the same as your current password"}), 400
 
         hashed_password = generate_password_hash(new_password)
 
-        # Atomic transaction: update password + mark temp password changed for onboarding
+        # Atomic transaction: update both password & password_hash + mark temp password changed for onboarding
         with Transaction() as cursor:
-            cursor.execute(
-                "UPDATE users SET password=%s, password_change_required=FALSE WHERE id=%s",
-                (hashed_password, current_user["user_id"])
-            )
+            if "password_hash" in user and "password" in user:
+                cursor.execute(
+                    "UPDATE users SET password=%s, password_hash=%s, password_change_required=FALSE WHERE id=%s",
+                    (hashed_password, hashed_password, current_user["user_id"])
+                )
+            elif "password_hash" in user:
+                cursor.execute(
+                    "UPDATE users SET password_hash=%s, password_change_required=FALSE WHERE id=%s",
+                    (hashed_password, current_user["user_id"])
+                )
+            else:
+                cursor.execute(
+                    "UPDATE users SET password=%s, password_change_required=FALSE WHERE id=%s",
+                    (hashed_password, current_user["user_id"])
+                )
 
             # Mark temp_password_changed for onboarding candidates
             if current_user["role"] == "onboarding_candidate":
@@ -359,12 +396,17 @@ def admin_reset_password(current_user, user_id):
     """Force reset any user's password (Admin only)."""
     try:
         from app.services.employee_service import DEFAULT_TEMP_PASSWORD
-        user = execute_single("SELECT id, username, employee_name FROM users WHERE id=%s", (user_id,))
+        user = execute_single("SELECT * FROM users WHERE id=%s", (user_id,))
         if not user:
             return jsonify({"success": False, "error": "User not found"}), 404
         
         hashed_password = generate_password_hash(DEFAULT_TEMP_PASSWORD)
-        execute_query("UPDATE users SET password=%s, password_change_required=TRUE WHERE id=%s", (hashed_password, user_id), commit=True)
+        if "password_hash" in user and "password" in user:
+            execute_query("UPDATE users SET password=%s, password_hash=%s, password_change_required=TRUE WHERE id=%s", (hashed_password, hashed_password, user_id), commit=True)
+        elif "password_hash" in user:
+            execute_query("UPDATE users SET password_hash=%s, password_change_required=TRUE WHERE id=%s", (hashed_password, user_id), commit=True)
+        else:
+            execute_query("UPDATE users SET password=%s, password_change_required=TRUE WHERE id=%s", (hashed_password, user_id), commit=True)
         
         log_audit_event(current_user["user_id"], "admin_password_reset", f"Admin forced password reset for {user['username']} ({user['employee_name']})")
         
@@ -450,7 +492,7 @@ def reset_password():
 
         # Find user by token and check expiry
         user = execute_single(
-            "SELECT id, username FROM users WHERE reset_token=%s AND reset_token_expiry > %s",
+            "SELECT * FROM users WHERE reset_token=%s AND reset_token_expiry > %s",
             (token, datetime.now())
         )
         
@@ -460,12 +502,25 @@ def reset_password():
         # Hash new password
         hashed_password = generate_password_hash(new_password)
         
-        # Update password and CLEAR token (single-use)
-        execute_query(
-            "UPDATE users SET password=%s, reset_token=NULL, reset_token_expiry=NULL, password_change_required=FALSE WHERE id=%s",
-            (hashed_password, user["id"]),
-            commit=True
-        )
+        # Update password & password_hash and CLEAR token (single-use)
+        if "password_hash" in user and "password" in user:
+            execute_query(
+                "UPDATE users SET password=%s, password_hash=%s, reset_token=NULL, reset_token_expiry=NULL, password_change_required=FALSE WHERE id=%s",
+                (hashed_password, hashed_password, user["id"]),
+                commit=True
+            )
+        elif "password_hash" in user:
+            execute_query(
+                "UPDATE users SET password_hash=%s, reset_token=NULL, reset_token_expiry=NULL, password_change_required=FALSE WHERE id=%s",
+                (hashed_password, user["id"]),
+                commit=True
+            )
+        else:
+            execute_query(
+                "UPDATE users SET password=%s, reset_token=NULL, reset_token_expiry=NULL, password_change_required=FALSE WHERE id=%s",
+                (hashed_password, user["id"]),
+                commit=True
+            )
         
         # Log audit event
         log_audit_event(user["id"], "password_reset_success", f"User {user['username']} successfully reset their password via token.")

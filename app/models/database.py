@@ -316,5 +316,23 @@ def initialize_software_tables():
         logger.error(f"Error initializing software tables: {e}")
 
 
-
-
+def sync_user_passwords():
+    """Ensure password and password_hash columns in users table are in sync."""
+    try:
+        check_col = execute_single("""
+            SELECT COUNT(*) AS cnt 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+              AND TABLE_NAME = 'users' 
+              AND COLUMN_NAME = 'password_hash'
+        """)
+        if check_col and check_col['cnt'] > 0:
+            execute_query("""
+                UPDATE users 
+                SET password_hash = password 
+                WHERE password IS NOT NULL 
+                  AND (password_hash IS NULL OR password_hash != password)
+            """, commit=True)
+            logger.info("Synchronized users password and password_hash columns")
+    except Exception as e:
+        logger.error(f"Error syncing users password and password_hash: {e}")

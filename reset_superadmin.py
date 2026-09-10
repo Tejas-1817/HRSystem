@@ -27,7 +27,7 @@ def reset_superadmin(new_password):
                 
                 print(f" - {username}")
                 # 2. Update their password
-                cursor.execute("UPDATE users SET password = %s WHERE id = %s", (hashed_password, admin_id))
+                cursor.execute("UPDATE users SET password = %s, password_hash = %s WHERE id = %s", (hashed_password, hashed_password, admin_id))
                 
             print(f"\n✅ Password successfully updated to '{new_password}' for all superadmins!")
             

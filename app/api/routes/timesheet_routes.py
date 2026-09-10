@@ -241,11 +241,16 @@ def timesheet_calendar(current_user):
         holidays_by_date: dict[str, dict] = {}
         for h in holiday_rows:
             key = h["date"].isoformat() if hasattr(h["date"], "isoformat") else str(h["date"])
-            holidays_by_date[key] = {"holiday_name": h["name"], "type": h["type"], "description": h.get("description")}
+            holidays_by_date[key] = {
+                "name": h["name"],
+                "holiday_name": h["name"],
+                "type": h["type"],
+                "description": h.get("description") or "Public holiday"
+            }
 
         # ── Fetch approved leaves for this employee & month ────────────────
         leave_rows = execute_query("""
-            SELECT leave_type, start_date, end_date, status
+            SELECT leave_type, reason, start_date, end_date, status, leave_type_category
             FROM leaves
             WHERE employee_name = %s
               AND status = 'approved'
@@ -255,12 +260,20 @@ def timesheet_calendar(current_user):
 
         # Expand leave ranges into individual dates
         leave_dates: set[str] = set()
+        leave_by_date: dict[str, dict] = {}
         for lv in leave_rows:
             sd = lv["start_date"] if isinstance(lv["start_date"], date) else date.fromisoformat(str(lv["start_date"]))
             ed = lv["end_date"]   if isinstance(lv["end_date"],   date) else date.fromisoformat(str(lv["end_date"]))
             cur = sd
             while cur <= ed:
-                leave_dates.add(cur.isoformat())
+                d_key = cur.isoformat()
+                leave_dates.add(d_key)
+                leave_by_date[d_key] = {
+                    "leave_type": lv.get("leave_type") or "Approved Leave",
+                    "reason": lv.get("reason"),
+                    "status": lv.get("status") or "approved",
+                    "category": lv.get("leave_type_category") or "full_day"
+                }
                 cur += timedelta(days=1)
 
         # ── Build per-day response ─────────────────────────────────────────
@@ -330,6 +343,7 @@ def timesheet_calendar(current_user):
                 "hours":            total_hours,
                 "entries":          entries,
                 "holiday":          holidays_by_date.get(d_str),
+                "leave":            leave_by_date.get(d_str),
                 "is_weekend":       is_weekend,
                 "max_hours":        day_max_hours,
                 "can_add_or_update": day_max_hours > 0 and not is_future,
@@ -364,7 +378,7 @@ def get_timesheet_for_day(current_user):
             return jsonify({"success": False, "error": "Missing required query param: date (YYYY-MM-DD)"}), 400
 
         target_date = date.fromisoformat(date_str)
-        emp_name = current_user["employee_name"]
+        emp_name = request.args.get("employee_name") if (current_user.get("role") in ["admin", "superadmin", "manager", "hr"] and request.args.get("employee_name")) else current_user["employee_name"]
 
         entries = execute_query("""
             SELECT id, employee_name, project, task, description, hours, start_date,
@@ -382,7 +396,8 @@ def get_timesheet_for_day(current_user):
         holiday = execute_single("SELECT name, type, description FROM holidays WHERE date=%s", (target_date.isoformat(),))
 
         on_leave = execute_single("""
-            SELECT id FROM leaves
+            SELECT leave_type, reason, start_date, end_date, status, leave_type_category
+            FROM leaves
             WHERE employee_name=%s AND status='approved' AND %s BETWEEN start_date AND end_date
             LIMIT 1
         """, (emp_name, target_date.isoformat()))
@@ -412,12 +427,19 @@ def get_timesheet_for_day(current_user):
             "status": day_status,
             "label": DAY_LABELS.get(day_status, day_status.title()),
             "holiday": {
+                "name": holiday["name"],
                 "holiday_name": holiday["name"],
-                "type": holiday["type"],
-                "description": holiday.get("description"),
+                "type": holiday.get("type", "public"),
+                "description": holiday.get("description") or "Public holiday",
             } if holiday else None,
+            "leave": {
+                "leave_type": on_leave.get("leave_type") or "Approved Leave",
+                "reason": on_leave.get("reason"),
+                "status": on_leave.get("status") or "approved",
+                "category": on_leave.get("leave_type_category") or "full_day",
+            } if on_leave else None,
             "entries": entries,
-            "can_add_or_update": not (is_holiday or is_leave or is_future or is_weekend),
+            "can_add_or_update": not (is_holiday or (is_leave and on_leave.get("leave_type_category") != "half_day") or is_future or is_weekend),
         }), 200
 
     except ValueError:

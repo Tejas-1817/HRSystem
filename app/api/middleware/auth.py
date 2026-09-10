@@ -228,6 +228,21 @@ def normalize_role(role):
         return 'onboarding_candidate'
     return str(role).lower().strip()
 
+TEAM_MEMBER_VIEW_FEATURES = {
+    'timesheets',
+    'leave',
+    'leaves',
+    'leave_management',
+    'projects',
+    'reimbursements',
+    'expenses',
+    'policies',
+    'helpdesk',
+    'holidays',
+    'birthdays',
+    'announcements',
+}
+
 def has_permission(user_or_role, feature_or_key, action=None) -> bool:
     """
     Central permission resolver: evaluates whether a user or role has permission.
@@ -244,6 +259,12 @@ def has_permission(user_or_role, feature_or_key, action=None) -> bool:
         
     fk = str(feature_or_key).lower().strip()
     act = str(action).lower().strip() if action else None
+    act_key = act if act else "view"
+
+    # Team member view access to standard employee features
+    if role in ('employee', 'team_member') and act_key == 'view':
+        if fk in TEAM_MEMBER_VIEW_FEATURES:
+            return True
 
     # 1. Direct permission key check
     if (role, fk) in cache:
@@ -259,7 +280,6 @@ def has_permission(user_or_role, feature_or_key, action=None) -> bool:
 
     # 2. Feature + action bundle check
     if fk in FEATURE_PERMISSION_MAP:
-        act_key = act if act else "view"
         perm_keys = FEATURE_PERMISSION_MAP[fk].get(act_key, [])
         for pk in perm_keys:
             if cache.get((role, pk), False):
@@ -292,6 +312,14 @@ def get_role_permissions_summary(role):
         for act_name, pk_list in actions.items():
             feature_actions[f_key][act_name] = any(granted_keys.get(pk, False) for pk in pk_list)
             
+    # Standard view permissions for team members
+    if role in ('employee', 'team_member'):
+        for f in TEAM_MEMBER_VIEW_FEATURES:
+            if f in feature_actions:
+                feature_actions[f]['view'] = True
+            else:
+                feature_actions[f] = {'view': True}
+
     return {
         "role": role,
         "permissions": granted_keys,
