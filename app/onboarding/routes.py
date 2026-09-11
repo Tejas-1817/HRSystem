@@ -53,7 +53,7 @@ def _validate_joinee_payload(data):
 
 
 @onboarding_bp.route("/joinees", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"])
 def create_joinee(current_user):
     try:
         data = request.get_json() or {}
@@ -144,7 +144,7 @@ def create_joinee(current_user):
 
 
 @onboarding_bp.route("/joinees", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"])
 def list_joinees(current_user):
     try:
         status_filter = request.args.get("status")
@@ -249,7 +249,7 @@ def get_joinee(current_user,joinee_id):
 
 
 @onboarding_bp.route("/joinees/<int:joinee_id>", methods=["DELETE"])
-@role_required(["hr"])
+@role_required(["hr", "admin", "superadmin"])
 def delete_joinee(current_user, joinee_id):
     try:
         hr_user_id = current_user.get("user_id")
@@ -522,7 +522,7 @@ def submit_declaration(current_user):
 # API 3 — GET /onboarding/declaration
 # ─────────────────────────────────────────────────────────────────────────
 @onboarding_bp.route("/declaration", methods=["GET"])
-@role_required(["onboarding_candidate", "hr"])
+@role_required(["onboarding_candidate", "hr", "admin", "superadmin"])
 def get_declaration(current_user):
     """
     Retrieve the full declaration for a joinee.
@@ -567,7 +567,7 @@ def get_declaration(current_user):
 # API 4 — PUT /onboarding/declaration/<joinee_id>/review
 # ─────────────────────────────────────────────────────────────────────────
 @onboarding_bp.route("/declaration/<int:joinee_id>/review", methods=["PUT"])
-@role_required(["hr"])
+@role_required(["hr", "admin", "superadmin"])
 def review_declaration(current_user, joinee_id):
     """
     HR reviews a submitted declaration — either approves or requests changes.
@@ -821,7 +821,7 @@ def upload_document(current_user):
 # API — GET /onboarding/documents
 # ─────────────────────────────────────────────────────────────────────────
 @onboarding_bp.route("/documents", methods=["GET"])
-@role_required(["onboarding_candidate", "hr"])
+@role_required(["onboarding_candidate", "hr", "admin", "superadmin"])
 def list_documents(current_user):
     """
     List onboarding documents.
@@ -871,7 +871,7 @@ def list_documents(current_user):
 # API — PUT /onboarding/documents/<document_id>/verify
 # ─────────────────────────────────────────────────────────────────────────
 @onboarding_bp.route("/documents/<int:document_id>/verify", methods=["PUT"])
-@role_required(["hr"])
+@role_required(["hr", "admin", "superadmin"])
 def verify_document(current_user, document_id):
     """
     HR verifies (approves or rejects) an onboarding document.
@@ -984,7 +984,7 @@ def verify_document(current_user, document_id):
 # API — DELETE /onboarding/documents/<document_id>
 # ─────────────────────────────────────────────────────────────────────────
 @onboarding_bp.route("/documents/<int:document_id>", methods=["DELETE"])
-@role_required(["onboarding_candidate", "hr"])
+@role_required(["onboarding_candidate", "hr", "admin", "superadmin"])
 def delete_document(current_user, document_id):
     """
     Delete an onboarding document.
@@ -1064,7 +1064,7 @@ def delete_document(current_user, document_id):
 # ═══════════════════════════════════════════════════════════════════════════
 
 @onboarding_bp.route("/stats", methods=["GET"])
-@role_required(["hr"])
+@role_required(["hr", "admin", "superadmin"])
 def get_onboarding_stats(current_user):
     """
     API 1: Get onboarding statistics for the HR dashboard.
@@ -1078,7 +1078,7 @@ def get_onboarding_stats(current_user):
 
 
 @onboarding_bp.route("/joinees/<int:joinee_id>/summary", methods=["GET"])
-@role_required(["hr"])
+@role_required(["hr", "admin", "superadmin"])
 def get_joinee_summary(current_user, joinee_id):
     """
     API 2: Provide a complete onboarding review summary for a single joinee.
@@ -1102,7 +1102,7 @@ def get_joinee_summary(current_user, joinee_id):
 # ═══════════════════════════════════════════════════════════════════════════
 
 @onboarding_bp.route("/joinees/<int:joinee_id>/migrate-login", methods=["PUT"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"])
 def migrate_login(current_user, joinee_id):
     """
     API 1: Perform the final onboarding login migration.
@@ -1125,7 +1125,7 @@ def migrate_login(current_user, joinee_id):
 
 
 @onboarding_bp.route("/joinees/<int:joinee_id>/prefill", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin"])
 def get_prefill(current_user, joinee_id):
     """
     API 2: Automatically retrieve verified onboarding information for HR prefill.
