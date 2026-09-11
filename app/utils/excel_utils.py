@@ -3,7 +3,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime
-from app.utils.display_name_service import get_clean_name
+from app.utils.display_name_service import get_clean_name, strip_all_prefixes
 
 def generate_timesheet_excel(employee_name, timesheets, start_date_str=None, end_date_str=None):
     """
@@ -407,10 +407,12 @@ def generate_assets_excel(assets, generated_by_name):
         
     # Table Header (Row 8)
     headers = [
-        "Asset ID", "Asset Tag", "Asset Name", "Category", "Ownership Type", 
-        "Status", "Model", "Serial Number", "Vendor Name", "Purchase Date", 
-        "Purchase Price", "Warranty Expiry", "Current Assigned Team Member", 
-        "Created Date", "Last Updated"
+        "Asset ID", "Current Assigned Team Member", "Asset Name", "Asset Tag", 
+        "Category", "Model", "Serial Number", "Status", "Ownership Type", 
+        "Processor", "RAM", "Storage", "Purchase Date", "Purchase Price", 
+        "Warranty Expiry", "Vendor Name", "Vendor Contact", "Rental Start Date", 
+        "Rental End Date", "Rental Cost", "Billing Frequency", "Agreement Status", 
+        "Notes", "Created Date", "Last Updated"
     ]
     
     header_row_idx = 8
@@ -428,25 +430,62 @@ def generate_assets_excel(assets, generated_by_name):
     
     # Add Data Rows
     data_start_row = 9
+    center_cols = {1, 5, 8, 9, 13, 15, 18, 19, 21, 22, 24, 25}
+    right_cols = {14, 20}
+
     for idx, asset in enumerate(assets):
         row_num = data_start_row + idx
+
+        # Resolve Current Assigned Team Member
+        assigned_name = asset.get("employee_name") or asset.get("assigned_to") or ""
+        clean_assigned = strip_all_prefixes(str(assigned_name)) if assigned_name else ""
+
+        # Agreement Status
+        ag_raw = (asset.get("acceptance_status") or "").lower().strip()
+        if ag_raw == "accepted":
+            agreement_status = "Signed"
+        elif ag_raw == "pending":
+            agreement_status = "Pending Signature"
+        elif ag_raw == "rejected":
+            agreement_status = "Rejected"
+        elif clean_assigned:
+            agreement_status = asset.get("acceptance_status") or "Pending Signature"
+        else:
+            agreement_status = "N/A"
+
+        ownership = asset.get("ownership_type") or "Purchased"
+        p_price = asset.get("purchase_price") or asset.get("cost") or asset.get("price") or ""
+        r_cost = asset.get("rental_cost") or ""
+        if not p_price and ownership == "Purchased" and r_cost:
+            p_price = r_cost
+            r_cost = ""
         
         row_data = [
-            asset.get("id", "N/A"),
-            asset.get("serial_number", "N/A"),  # Often used as Asset Tag if tag is not present
-            asset.get("brand", "N/A"),          # Used as Asset Name
-            asset.get("device_type", "N/A"),
-            asset.get("ownership_type", "Purchased"),
-            asset.get("status", "N/A"),
-            asset.get("model", "N/A"),
-            asset.get("serial_number", "N/A"),
-            asset.get("vendor_name", "N/A") if asset.get("ownership_type") == "Rented" else "N/A",
-            asset.get("purchase_date") or "N/A",
-            "N/A",  # Purchase Price doesn't exist in current schema
-            asset.get("warranty_expiry") or "N/A",
-            asset.get("assigned_to", "Unassigned") or "Unassigned",
-            asset.get("created_at", "N/A"),
-            asset.get("updated_at", "N/A")
+            asset.get("id") or asset.get("device_id") or "",
+            clean_assigned,
+            asset.get("device_name") or asset.get("brand") or "",
+            asset.get("asset_id") or asset.get("asset_tag") or asset.get("serial_number") or "",
+            asset.get("device_type") or asset.get("category") or "",
+            asset.get("model") or asset.get("device_type") or "",
+            asset.get("serial_number") or "",
+            (asset.get("status") or "Available").capitalize(),
+            ownership,
+            asset.get("processor") or "",
+            asset.get("ram") or "",
+            asset.get("storage") or "",
+            str(asset.get("purchase_date") or "")[:10],
+            p_price,
+            str(asset.get("warranty_expiry") or asset.get("warranty_end") or "")[:10],
+            asset.get("vendor_name") or "",
+            asset.get("vendor_contact") or "",
+            str(asset.get("rental_start_date") or "")[:10],
+            str(asset.get("rental_end_date") or "")[:10],
+            r_cost,
+            asset.get("rental_cost_frequency") or "",
+            agreement_status,
+            asset.get("notes") or asset.get("condition_notes") or asset.get("description") or "",
+            str(asset.get("created_at") or "")[:19].replace("T", " "),
+            str(asset.get("updated_at") or "")[:19].replace("T", " ")
         ]
         
         # Apply zebra striping based on index
@@ -459,8 +498,10 @@ def generate_assets_excel(assets, generated_by_name):
             cell.fill = row_fill
             
             # Alignments & Formatting
-            if col_num in (1, 10, 11, 12, 14, 15):  # ID, Dates, Price
+            if col_num in center_cols:
                 cell.alignment = center_aligned
+            elif col_num in right_cols:
+                cell.alignment = right_aligned
             else:
                 cell.alignment = left_aligned
 

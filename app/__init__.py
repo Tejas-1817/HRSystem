@@ -145,8 +145,10 @@ def create_app():
             initialize_reimbursement_tables,
             initialize_holiday_tables,
             initialize_software_tables,
+            initialize_leave_tables,
             sync_user_passwords
         )
+        initialize_leave_tables()
         initialize_rental_invoice_tables()
         initialize_reimbursement_tables()
         initialize_holiday_tables()

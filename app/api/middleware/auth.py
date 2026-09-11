@@ -253,6 +253,10 @@ def has_permission(user_or_role, feature_or_key, action=None) -> bool:
     role = user_or_role.get("role") if isinstance(user_or_role, dict) else str(user_or_role or "")
     role = normalize_role(role)
     
+    # Superadmin bypass: Super Admin always has full, unrestricted access to all features & actions
+    if role == 'superadmin':
+        return True
+
     cache = get_permissions_cache()
     if not cache:
         return False
@@ -297,6 +301,24 @@ def get_role_permissions_summary(role):
     Returns full permissions and feature_actions dictionary for a role.
     """
     role = normalize_role(role)
+    if role == 'superadmin':
+        all_perms = {}
+        cache = get_permissions_cache() or {}
+        for (r, pk) in cache.keys():
+            all_perms[pk] = True
+        for f_key, actions in FEATURE_PERMISSION_MAP.items():
+            for act_name, pk_list in actions.items():
+                for pk in pk_list:
+                    all_perms[pk] = True
+        all_features = {}
+        for f_key, actions in FEATURE_PERMISSION_MAP.items():
+            all_features[f_key] = {act_name: True for act_name in actions.keys()}
+        return {
+            "role": "superadmin",
+            "permissions": all_perms,
+            "feature_actions": all_features
+        }
+
     cache = get_permissions_cache() or {}
     
     granted_keys = {}
@@ -411,6 +433,12 @@ def role_required(allowed_roles, permission_key=None, action=None):
             except jwt.InvalidTokenError:
                 return jsonify({"success": False, "error": "Invalid token. Please login again."}), 401
 
+            user_role = normalize_role(current_user["role"])
+
+            # Superadmin bypass: superadmin has access to every route and action
+            if user_role == 'superadmin':
+                return f(current_user=current_user, *args, **kwargs)
+
             # Check dynamic permission if specified
             if permission_key:
                 if not has_permission(current_user, permission_key, action):
@@ -421,10 +449,9 @@ def role_required(allowed_roles, permission_key=None, action=None):
                 return f(current_user=current_user, *args, **kwargs)
 
             # Role check
-            user_role = normalize_role(current_user["role"])
             allowed_roles_lower = [normalize_role(r) for r in allowed_roles]
 
-            if user_role not in allowed_roles_lower and user_role != 'superadmin':
+            if user_role not in allowed_roles_lower:
                 return jsonify({
                     "success": False,
                     "error": f"Access denied. Required role: {', '.join(allowed_roles)}. Your role: {current_user['role']}"

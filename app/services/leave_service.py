@@ -442,9 +442,10 @@ def get_employee_balance(employee_name):
 
     # Normalize Decimal DB values to float for JSON serialisation
     for r in rows:
-        r["total_leaves"]     = float(r["total_leaves"])
-        r["used_leaves"]      = float(r["used_leaves"])
-        r["remaining_leaves"] = float(r["remaining_leaves"])
+        r["total_leaves"]     = float(r["total_leaves"]) if r.get("total_leaves") is not None else 0.0
+        r["used_leaves"]      = float(r["used_leaves"]) if r.get("used_leaves") is not None else 0.0
+        rem = r.get("remaining_leaves")
+        r["remaining_leaves"] = float(rem) if rem is not None else (r["total_leaves"] - r["used_leaves"])
 
     return rows
 

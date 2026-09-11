@@ -102,7 +102,10 @@ def list_devices(filters: dict = None) -> list:
         LEFT JOIN device_assignments da
             ON d.id = da.device_id AND da.returned_date IS NULL
         LEFT JOIN employee e
-            ON da.employee_name = e.name
+            ON (da.employee_name = e.name 
+                OR da.employee_name = CAST(e.id AS CHAR) 
+                OR da.employee_name = e.original_name 
+                OR (e.team_member_code IS NOT NULL AND da.employee_name = e.team_member_code))
         {where_clause}
         ORDER BY {sort_by} {sort_order}
     """, tuple(params) if params else None)
@@ -131,7 +134,10 @@ def get_device_by_id(device_id: int):
         LEFT JOIN device_assignments da
             ON d.id = da.device_id AND da.returned_date IS NULL
         LEFT JOIN employee e
-            ON da.employee_name = e.name
+            ON (da.employee_name = e.name 
+                OR da.employee_name = CAST(e.id AS CHAR) 
+                OR da.employee_name = e.original_name 
+                OR (e.team_member_code IS NOT NULL AND da.employee_name = e.team_member_code))
         WHERE d.id = %s AND d.is_deleted = FALSE
     """, (device_id,))
     if device:

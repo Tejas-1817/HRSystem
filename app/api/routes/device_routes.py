@@ -63,7 +63,9 @@ def export_devices(current_user):
         }
 
         # Run export logic
-        excel_data = generate_assets_excel(filters)
+        devices = list_devices(filters)
+        user_name = current_user.get("username") or current_user.get("name") or "Admin"
+        excel_data = generate_assets_excel(devices, user_name)
 
         # Audit log
         audit_desc = f"Exported assets to Excel"

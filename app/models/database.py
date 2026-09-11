@@ -336,3 +336,100 @@ def sync_user_passwords():
             logger.info("Synchronized users password and password_hash columns")
     except Exception as e:
         logger.error(f"Error syncing users password and password_hash: {e}")
+
+
+def initialize_leave_tables():
+    """Ensure leaves, leave_balance, leave_approval_history, and leave_signoffs tables and all required columns exist."""
+    try:
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS leaves (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                employee_name VARCHAR(100) NOT NULL,
+                leave_type VARCHAR(50) NOT NULL,
+                leave_type_category ENUM('full_day', 'half_day') NOT NULL DEFAULT 'full_day',
+                half_day_period ENUM('first_half', 'second_half') NULL,
+                leave_duration DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                reason TEXT,
+                status VARCHAR(20) DEFAULT 'pending',
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                approved_by VARCHAR(100) NULL,
+                approver_role VARCHAR(50) NULL,
+                approved_at TIMESTAMP NULL,
+                rejection_reason TEXT NULL,
+                requester_role VARCHAR(50) NULL,
+                INDEX idx_leave_emp_date (employee_name, start_date),
+                INDEX idx_leave_status (status)
+            )
+        """, commit=True)
+
+        # Check and add missing audit columns if leaves was created with legacy schema
+        required_cols = [
+            ("approved_by", "VARCHAR(100) NULL"),
+            ("approver_role", "VARCHAR(50) NULL"),
+            ("approved_at", "TIMESTAMP NULL"),
+            ("rejection_reason", "TEXT NULL"),
+            ("requester_role", "VARCHAR(50) NULL"),
+            ("leave_type_category", "ENUM('full_day', 'half_day') NOT NULL DEFAULT 'full_day'"),
+            ("half_day_period", "ENUM('first_half', 'second_half') NULL"),
+            ("leave_duration", "DECIMAL(4,2) NOT NULL DEFAULT 1.00"),
+        ]
+        for col_name, col_def in required_cols:
+            col_check = execute_single("""
+                SELECT COUNT(*) AS cnt 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                  AND TABLE_NAME = 'leaves' 
+                  AND COLUMN_NAME = %s
+            """, (col_name,))
+            if col_check and col_check['cnt'] == 0:
+                execute_query(f"ALTER TABLE leaves ADD COLUMN {col_name} {col_def}", commit=True)
+                logger.info(f"Added missing column {col_name} to leaves table")
+
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS leave_balance (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                employee_name VARCHAR(100) NOT NULL,
+                leave_type VARCHAR(50) NOT NULL,
+                total_leaves DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+                used_leaves DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+                UNIQUE KEY unique_emp_leave (employee_name, leave_type)
+            )
+        """, commit=True)
+
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS leave_approval_history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                leave_id INT NOT NULL,
+                action ENUM('submitted', 'approved', 'rejected', 'cancelled') NOT NULL,
+                actor VARCHAR(100) NOT NULL,
+                actor_role VARCHAR(50) NOT NULL,
+                reason TEXT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_lah_leave (leave_id),
+                INDEX idx_lah_actor (actor),
+                INDEX idx_lah_created (created_at)
+            )
+        """, commit=True)
+
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS leave_signoffs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                leave_id INT NOT NULL,
+                approver_role VARCHAR(50) NOT NULL,
+                approver_name VARCHAR(100) NULL,
+                project_name VARCHAR(100) NULL,
+                status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+                action_by VARCHAR(100) NULL,
+                action_at TIMESTAMP NULL,
+                comments TEXT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_ls_leave (leave_id),
+                INDEX idx_ls_status (status)
+            )
+        """, commit=True)
+        logger.info("Leave tables initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing leave tables: {e}")
+

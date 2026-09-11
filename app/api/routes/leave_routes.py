@@ -295,7 +295,7 @@ def view_leaves(current_user):
                 l.leave_type,
                 l.leave_type_category,
                 l.half_day_period,
-                CAST(l.leave_duration AS FLOAT) AS total_days,
+                l.leave_duration AS total_days,
                 l.start_date,
                 l.end_date,
                 l.reason,
@@ -344,7 +344,7 @@ def get_leave_by_id(current_user, leave_id):
                 l.leave_type,
                 l.leave_type_category,
                 l.half_day_period,
-                CAST(l.leave_duration AS FLOAT) AS total_days,
+                l.leave_duration AS total_days,
                 l.start_date,
                 l.end_date,
                 l.reason,
@@ -462,15 +462,19 @@ def view_all_leave_balances(current_user):
     try:
         rows = execute_query("""
             SELECT employee_name, leave_type,
-                   CAST(total_leaves AS FLOAT) AS total_leaves,
-                   CAST(used_leaves  AS FLOAT) AS used_leaves,
-                   CAST(total_leaves - used_leaves AS FLOAT) AS remaining_leaves
+                   total_leaves,
+                   used_leaves,
+                   (total_leaves - used_leaves) AS remaining_leaves
             FROM leave_balance
             ORDER BY employee_name, leave_type
         """)
 
         grouped = {}
         for r in rows:
+            r["total_leaves"] = float(r.get("total_leaves") or 0)
+            r["used_leaves"] = float(r.get("used_leaves") or 0)
+            rem = r.get("remaining_leaves")
+            r["remaining_leaves"] = float(rem) if rem is not None else (r["total_leaves"] - r["used_leaves"])
             name = r["employee_name"]
             if name not in grouped:
                 grouped[name] = []
