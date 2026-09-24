@@ -21,6 +21,18 @@ def _compute_month_status(month_num: int, year: int, rental_start, rental_end, n
     - Upcoming: month is in the future relative to next_due_date
     """
     today = date.today()
+    if not year or not isinstance(year, int):
+        try:
+            year = int(year)
+        except Exception:
+            year = today.year
+
+    if not month_num or not isinstance(month_num, int):
+        try:
+            month_num = int(month_num)
+        except Exception:
+            month_num = today.month
+
     # First day of the target month
     month_start = date(year, month_num, 1)
     # Last day of the target month
@@ -121,7 +133,8 @@ def get_rental_matrix(filters: dict = None, page: int = 1, page_size: int = 20, 
     Returns paginated rental matrix rows.
     Each row includes a 'months' dict keyed by month name with {amount, status}.
     """
-    year = int(filters.get('year', date.today().year)) if filters else date.today().year
+    raw_year = filters.get('year') if filters else None
+    year = int(raw_year) if raw_year else date.today().year
     month_filter = filters.get('month') if filters else None
 
     conditions, params = _build_base_conditions(filters)
@@ -247,7 +260,8 @@ def get_vendor_summary(filters: dict = None):
 
 def get_month_summary(filters: dict = None):
     """Returns per-month cost and active asset count for the horizontal strip."""
-    year = int(filters.get('year', date.today().year)) if filters else date.today().year
+    raw_year = filters.get('year') if filters else None
+    year = int(raw_year) if raw_year else date.today().year
     conditions, params = _build_base_conditions(filters)
     where_clause = "WHERE " + " AND ".join(conditions)
 

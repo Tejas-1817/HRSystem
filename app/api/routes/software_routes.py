@@ -57,7 +57,7 @@ def get_software(current_user):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @software_bp.route("/", methods=["POST"], strict_slashes=False)
-@role_required(["admin"])
+@role_required(["admin", "superadmin", "system_admin"])
 def add_software(current_user):
     try:
         data = request.get_json() or {}
@@ -96,7 +96,7 @@ def get_single_software(current_user, software_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @software_bp.route("/<int:software_id>", methods=["PUT"])
-@role_required(["admin"])
+@role_required(["admin", "superadmin", "system_admin"])
 def update_software(current_user, software_id):
     try:
         data = request.get_json() or {}
@@ -135,7 +135,7 @@ def update_software(current_user, software_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @software_bp.route("/<int:software_id>", methods=["DELETE"])
-@role_required(["admin"])
+@role_required(["admin", "superadmin", "system_admin"])
 def delete_software(current_user, software_id):
     try:
         existing = execute_single("SELECT id FROM software_licenses WHERE id = %s", (software_id,))

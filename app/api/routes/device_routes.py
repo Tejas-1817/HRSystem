@@ -24,7 +24,7 @@ from datetime import datetime
 device_bp = Blueprint("devices", __name__)
 
 @device_bp.route("/", methods=["GET"], strict_slashes=False)
-@role_required(["hr", "admin", "superadmin"], permission_key="devices.view_all")
+@role_required(["hr", "admin", "superadmin", "system_admin"], permission_key="devices.view_all")
 def get_all_devices(current_user):
     filters = {
         "status": request.args.get("status"),
@@ -36,7 +36,7 @@ def get_all_devices(current_user):
     return jsonify({"success": True, "devices": devices, "count": len(devices)}), 200
 
 @device_bp.route("/export", methods=["GET"])
-@role_required(["hr", "admin", "superadmin"], permission_key="devices.export")
+@role_required(["hr", "admin", "superadmin", "system_admin"], permission_key="devices.export")
 def export_devices(current_user):
     """
     Export Asset Inventory to Excel format.
@@ -92,7 +92,7 @@ def export_devices(current_user):
         return jsonify({"success": False, "error": f"Failed to export assets: {str(e)}"}), 500
 
 @device_bp.route("/", methods=["POST"], strict_slashes=False)
-@role_required(["hr", "admin", "superadmin"], permission_key="devices.create")
+@role_required(["hr", "admin", "superadmin", "system_admin"], permission_key="devices.create")
 def add_device(current_user):
     data = request.get_json() or {}
     required = ["brand", "model", "serial_number"]
@@ -118,8 +118,8 @@ def get_device(current_user, device_id):
     if not device:
         return jsonify({"success": False, "error": "Device not found"}), 404
     
-    # RBAC check: employees can only view if assigned to them or if they are HR/Admin/Superadmin
-    if current_user["role"] not in ("hr", "admin", "superadmin"):
+    # RBAC check: employees can only view if assigned to them or if they are HR/Admin/Superadmin/SystemAdmin
+    if current_user["role"] not in ("hr", "admin", "superadmin", "system_admin"):
         # Check current assignment
         assignments = get_employee_devices(current_user["employee_name"])
         if not any(d["id"] == device_id for d in assignments):
@@ -128,7 +128,7 @@ def get_device(current_user, device_id):
     return jsonify({"success": True, "device": device}), 200
 
 @device_bp.route("/<int:device_id>", methods=["PUT"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def edit_device(current_user, device_id):
     """
     Enterprise Asset Edit API
@@ -179,7 +179,7 @@ def edit_device(current_user, device_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @device_bp.route("/<int:device_id>/assign", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def allocate_device(current_user, device_id):
     data = request.get_json() or {}
     employee_name = data.get("employee_name")
@@ -191,7 +191,7 @@ def allocate_device(current_user, device_id):
     return jsonify({"success": False, "error": "Device not found or not available. Only devices with status 'Available' can be assigned."}), 400
 
 @device_bp.route("/<int:device_id>/return", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def deallocate_device(current_user, device_id):
     """
     Return an assigned asset — enterprise-grade workflow.
@@ -229,7 +229,7 @@ def deallocate_device(current_user, device_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @device_bp.route("/<int:device_id>/upload-image", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def upload_image(current_user, device_id):
     if 'image' not in request.files:
         return jsonify({"success": False, "error": "No image part in request"}), 400
@@ -254,7 +254,7 @@ def get_my_gear(current_user):
     return jsonify({"success": True, "devices": devices}), 200
 
 @device_bp.route("/employee/<employee_name>", methods=["GET"])
-@role_required(["hr", "manager", "admin", "superadmin"])
+@role_required(["hr", "manager", "admin", "superadmin", "system_admin"])
 def get_devices_for_employee(current_user, employee_name):
     """Return all currently-assigned devices for a specific employee.
     Accessible by HR, Manager, and Admin — unlike GET /devices/ which is HR-only
@@ -264,14 +264,14 @@ def get_devices_for_employee(current_user, employee_name):
     return jsonify({"success": True, "devices": devices, "count": len(devices)}), 200
 
 @device_bp.route("/<int:device_id>/history", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def get_history(current_user, device_id):
     history = get_device_history(device_id)
     return jsonify({"success": True, "history": history}), 200
 
 
 @device_bp.route("/<int:device_id>", methods=["DELETE"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def delete_device(current_user, device_id):
     """
     Soft-delete a device (HR / Admin only).
@@ -303,7 +303,7 @@ def delete_device(current_user, device_id):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @device_bp.route("/inventory", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def inventory_dashboard(current_user):
     """Full inventory dashboard: stock by status, category, brand + low stock alerts."""
     try:
@@ -314,7 +314,7 @@ def inventory_dashboard(current_user):
 
 
 @device_bp.route("/inventory/low-stock", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def low_stock_alerts(current_user):
     """Low-stock alerts: catalog entries where available < threshold."""
     try:
@@ -325,7 +325,7 @@ def low_stock_alerts(current_user):
 
 
 @device_bp.route("/inventory/reconcile", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def stock_reconciliation(current_user):
     """Stock reconciliation: compare device statuses vs assignment state."""
     try:
@@ -336,7 +336,7 @@ def stock_reconciliation(current_user):
 
 
 @device_bp.route("/catalog", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def get_catalog(current_user):
     """List all catalog SKUs with real-time stock counts."""
     try:
@@ -347,7 +347,7 @@ def get_catalog(current_user):
 
 
 @device_bp.route("/catalog", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def add_catalog_entry(current_user):
     """Add a new catalog SKU."""
     data = request.get_json() or {}
@@ -364,7 +364,7 @@ def add_catalog_entry(current_user):
 
 
 @device_bp.route("/catalog/<int:catalog_id>", methods=["PUT"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def edit_catalog_entry(current_user, catalog_id):
     """Update a catalog SKU."""
     data = request.get_json() or {}
@@ -379,7 +379,7 @@ def edit_catalog_entry(current_user, catalog_id):
 
 
 @device_bp.route("/catalog/<int:catalog_id>/stock", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def catalog_stock(current_user, catalog_id):
     """Stock counts for a specific catalog SKU."""
     try:
@@ -392,7 +392,7 @@ def catalog_stock(current_user, catalog_id):
 
 
 @device_bp.route("/<int:device_id>/status", methods=["PATCH"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def change_device_status(current_user, device_id):
     """Change a device's status (Available ↔ Under Repair, Retired)."""
     data = request.get_json() or {}
@@ -411,7 +411,7 @@ def change_device_status(current_user, device_id):
 
 
 @device_bp.route("/<int:device_id>/lifecycle", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def device_lifecycle(current_user, device_id):
     """Full asset lifecycle timeline."""
     try:
@@ -440,7 +440,7 @@ def view_agreement(current_user, device_id):
     """
     try:
         # Determine whose agreement to fetch
-        if current_user["role"] in ("hr", "admin", "superadmin"):
+        if current_user["role"] in ("hr", "admin", "superadmin", "system_admin"):
             # HR can view the agreement for whoever is currently assigned
             from app.models.database import execute_single
             assignment = execute_single("""
@@ -561,7 +561,7 @@ def device_acceptance_status(current_user, device_id):
         status = get_acceptance_status(device_id)
 
         # RBAC for employees: only view own assignment
-        if current_user["role"] not in ("hr", "admin", "superadmin"):
+        if current_user["role"] not in ("hr", "admin", "superadmin", "system_admin"):
             if status.get("assigned") and status.get("employee_name") != current_user["employee_name"]:
                 return jsonify({"success": False, "error": "Access denied"}), 403
 

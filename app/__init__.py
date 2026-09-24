@@ -89,6 +89,7 @@ def create_app():
     from app.onboarding import onboarding_bp
     from app.offboarding.routes import offboarding_bp
     from app.api.routes.software_routes import software_bp
+    from app.api.routes.exit_portal_routes import exit_portal_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(employee_bp, url_prefix='/employees')
@@ -114,6 +115,7 @@ def create_app():
     app.register_blueprint(onboarding_bp, url_prefix='/onboarding')
     app.register_blueprint(offboarding_bp, url_prefix='/offboarding')
     app.register_blueprint(software_bp, url_prefix='/software')
+    app.register_blueprint(exit_portal_bp)
 
     @app.after_request
     def add_security_headers(response):

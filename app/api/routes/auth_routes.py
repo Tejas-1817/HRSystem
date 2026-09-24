@@ -375,9 +375,9 @@ def update_user_role(current_user, user_id):
 # --- Super Admin Management Endpoints ---
 
 @auth_bp.route("/admin/audit-logs", methods=["GET"])
-@superadmin_required
+@role_required(["superadmin", "system_admin", "admin"])
 def get_audit_logs(current_user):
-    """View all system activity logs (Admin only)."""
+    """View all system activity logs (Admin / System Admin)."""
     try:
         logs = execute_query("""
             SELECT al.*, u.username, u.role, u.employee_name 
@@ -387,6 +387,41 @@ def get_audit_logs(current_user):
             LIMIT 500
         """)
         return jsonify({"success": True, "logs": logs}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@auth_bp.route("/admin/user-accounts", methods=["GET"])
+@role_required(["superadmin", "system_admin", "admin"])
+def get_user_accounts(current_user):
+    """List all corporate user accounts with status."""
+    try:
+        users = execute_query("""
+            SELECT u.id, u.username, u.employee_name, u.role, u.is_active, u.created_at,
+                   e.department, e.designation, e.employment_status
+            FROM users u
+            LEFT JOIN employee e ON u.employee_name = e.name
+            ORDER BY u.created_at DESC
+        """)
+        return jsonify({"success": True, "users": users}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@auth_bp.route("/admin/users/<int:user_id>/toggle-status", methods=["POST"])
+@role_required(["superadmin", "system_admin", "admin"])
+def toggle_user_status(current_user, user_id):
+    """Enable or disable a corporate user account."""
+    try:
+        user = execute_single("SELECT * FROM users WHERE id=%s", (user_id,))
+        if not user:
+            return jsonify({"success": False, "error": "User not found"}), 404
+        
+        new_status = not bool(user.get("is_active", True))
+        execute_query("UPDATE users SET is_active=%s WHERE id=%s", (new_status, user_id), commit=True)
+        
+        status_label = "enabled" if new_status else "disabled"
+        log_audit_event(current_user["user_id"], "user_status_toggle", f"{current_user.get('role')} {status_label} account for {user['username']}")
+        
+        return jsonify({"success": True, "is_active": new_status, "message": f"Account {status_label} successfully."}), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

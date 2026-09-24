@@ -222,6 +222,8 @@ def normalize_role(role):
     r = str(role).lower().strip().replace(' ', '').replace('_', '')
     if r in ['superadmin', 'super_admin', 'super admin']:
         return 'superadmin'
+    if r in ['systemadmin', 'system_admin', 'system admin']:
+        return 'system_admin'
     if r in ['teammember', 'team_member']:
         return 'employee'
     if r in ['onboardingcandidate', 'onboarding_candidate']:
@@ -241,6 +243,10 @@ TEAM_MEMBER_VIEW_FEATURES = {
     'holidays',
     'birthdays',
     'announcements',
+    'software',
+    'devices',
+    'devices_assets',
+    'inventory',
 }
 
 def has_permission(user_or_role, feature_or_key, action=None) -> bool:
@@ -265,9 +271,15 @@ def has_permission(user_or_role, feature_or_key, action=None) -> bool:
     act = str(action).lower().strip() if action else None
     act_key = act if act else "view"
 
-    # Team member view access to standard employee features
-    if role in ('employee', 'team_member') and act_key == 'view':
+    # Team member view access to standard employee features (and system admin)
+    if role in ('employee', 'team_member', 'system_admin') and act_key == 'view':
         if fk in TEAM_MEMBER_VIEW_FEATURES:
+            return True
+
+    if role == 'system_admin':
+        if fk in ['devices', 'devices_assets', 'assets', 'software', 'inventory', 'inventory_stock', 'offboarding', 'system_access', 'user_accounts', 'audit_logs']:
+            return True
+        if any(fk.startswith(prefix) for prefix in ['devices.', 'software.', 'inventory.', 'offboarding.', 'system_access.', 'user_accounts.', 'audit_logs.']):
             return True
 
     # 1. Direct permission key check
@@ -334,8 +346,8 @@ def get_role_permissions_summary(role):
         for act_name, pk_list in actions.items():
             feature_actions[f_key][act_name] = any(granted_keys.get(pk, False) for pk in pk_list)
             
-    # Standard view permissions for team members
-    if role in ('employee', 'team_member'):
+    # Standard view permissions for team members and system admin
+    if role in ('employee', 'team_member', 'system_admin'):
         for f in TEAM_MEMBER_VIEW_FEATURES:
             if f in feature_actions:
                 feature_actions[f]['view'] = True
@@ -450,6 +462,13 @@ def role_required(allowed_roles, permission_key=None, action=None):
 
             # Role check
             allowed_roles_lower = [normalize_role(r) for r in allowed_roles]
+
+            if user_role == 'system_admin':
+                if any(r in allowed_roles_lower for r in ['admin', 'hr']):
+                    if any(seg in request.path for seg in ['device', 'software', 'inventory', 'asset', 'offboarding']):
+                        allowed_roles_lower.append('system_admin')
+                if any(r in allowed_roles_lower for r in ['employee', 'team_member', 'teammember']):
+                    allowed_roles_lower.append('system_admin')
 
             if user_role not in allowed_roles_lower:
                 return jsonify({

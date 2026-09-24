@@ -34,7 +34,7 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
 
 
 @rental_invoice_bp.route("/vendor-invoice/<path:vendor_name>", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def get_vendor_invoice_details(current_user, vendor_name):
     """Returns full vendor invoice details: meta + all assets + financials + uploaded invoice info."""
     try:
@@ -132,7 +132,7 @@ def get_vendor_invoice_details(current_user, vendor_name):
 
 
 @rental_invoice_bp.route("/vendor-invoice/<path:vendor_name>/upload", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def upload_vendor_invoice_file(current_user, vendor_name):
     """Upload a vendor invoice file (PDF, JPG, PNG) and associate with vendor."""
     try:
@@ -199,7 +199,7 @@ def upload_vendor_invoice_file(current_user, vendor_name):
 
 
 @rental_invoice_bp.route("/vendor-invoice/<path:vendor_name>/file", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def get_vendor_invoice_file(current_user, vendor_name):
     """View uploaded vendor invoice document inline in browser."""
     try:
@@ -221,7 +221,7 @@ def get_vendor_invoice_file(current_user, vendor_name):
 
 
 @rental_invoice_bp.route("/vendor-invoice/<path:vendor_name>/download", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def download_vendor_invoice_file(current_user, vendor_name):
     """Download uploaded vendor invoice document."""
     try:
@@ -244,7 +244,7 @@ def download_vendor_invoice_file(current_user, vendor_name):
 
 
 @rental_invoice_bp.route("/vendor-invoice/<path:vendor_name>/upload", methods=["DELETE"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def delete_vendor_invoice_file(current_user, vendor_name):
     """Delete uploaded vendor invoice document."""
     try:
@@ -275,7 +275,7 @@ def delete_vendor_invoice_file(current_user, vendor_name):
 
 
 @rental_invoice_bp.route("/vendor-invoice/<path:vendor_name>", methods=["PUT"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def update_vendor_invoice(current_user, vendor_name):
     """Update master invoice number and/or status for a vendor."""
     try:
@@ -323,7 +323,7 @@ def update_vendor_invoice(current_user, vendor_name):
 
 
 @rental_invoice_bp.route("/vendor-invoice/<path:vendor_name>/asset-payment", methods=["PUT"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def update_vendor_asset_payment(current_user, vendor_name):
     """Toggle payment status for an individual asset under a vendor and update vendor invoice status automatically."""
     try:
@@ -386,7 +386,7 @@ def update_vendor_asset_payment(current_user, vendor_name):
 
 
 @rental_invoice_bp.route("/vendor-invoice/<path:vendor_name>/pay-all", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def pay_all_vendor_assets(current_user, vendor_name):
     """Mark all assets for a vendor as Paid and update vendor invoice status to Paid."""
     try:
@@ -420,7 +420,7 @@ def pay_all_vendor_assets(current_user, vendor_name):
 
 
 @rental_invoice_bp.route("/invoices", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def list_invoices(current_user):
     """Returns list of filtered invoices."""
     try:
@@ -436,7 +436,7 @@ def list_invoices(current_user):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @rental_invoice_bp.route("/invoices/<int:invoice_id>/pay", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def process_payment(current_user, invoice_id):
     """Mark invoice as paid and process cycle advancement."""
     try:
@@ -449,7 +449,7 @@ def process_payment(current_user, invoice_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @rental_invoice_bp.route("/invoices/dashboard-widgets", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def dashboard_widgets(current_user):
     """Returns invoice metrics for dashboard widgets."""
     try:
@@ -459,7 +459,7 @@ def dashboard_widgets(current_user):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @rental_invoice_bp.route("/invoices/history/<device_id>", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def invoice_history(current_user, device_id):
     """Returns full invoice/payment history for a device."""
     try:
@@ -469,7 +469,7 @@ def invoice_history(current_user, device_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @rental_invoice_bp.route("/invoices/trigger-check", methods=["POST"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def trigger_check(current_user):
     """Manually triggers automated check (useful for debugging/testing)."""
     try:

@@ -30,7 +30,7 @@ def _extract_filters(args):
 
 
 @rental_bp.route("/matrix", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def get_matrix(current_user):
     """Returns paginated rental matrix."""
     try:
@@ -44,7 +44,7 @@ def get_matrix(current_user):
 
 
 @rental_bp.route("/vendor-summary", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def vendor_summary(current_user):
     """Returns vendor aggregations for the left-rail panel."""
     try:
@@ -56,7 +56,7 @@ def vendor_summary(current_user):
 
 
 @rental_bp.route("/month-summary", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def month_summary(current_user):
     """Returns per-month cost and active asset count."""
     try:
@@ -68,7 +68,7 @@ def month_summary(current_user):
 
 
 @rental_bp.route("/dashboard-stats", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def dashboard_stats(current_user):
     """Returns the 4 summary card stats."""
     try:
@@ -80,7 +80,7 @@ def dashboard_stats(current_user):
 
 
 @rental_bp.route("/export", methods=["GET"])
-@role_required(["hr", "admin"])
+@role_required(["hr", "admin", "superadmin", "system_admin"])
 def export_rental(current_user):
     """Exports the full filtered rental matrix as an Excel file."""
     try:
