@@ -190,7 +190,7 @@ def _get_eligible_employees() -> List[Dict[str, Any]]:
     """Return all active Full Time employees with their date_of_joining."""
     return execute_query("""
         SELECT e.name AS employee_name, e.date_of_joining
-        FROM employees e
+        FROM employee e
         JOIN users u ON u.employee_name = e.name
         WHERE u.is_active = TRUE
           AND e.employment_type = %s
