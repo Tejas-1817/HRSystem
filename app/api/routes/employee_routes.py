@@ -481,9 +481,26 @@ def update_employee(current_user, emp_id):
 
             updates["email"] = email_val
 
-        # ── 4. Execute UPDATE ──────────────────────────────────────────────
-        set_clause = ", ".join(f"{col} = %s" for col in updates)
-        values     = list(updates.values()) + [emp_id]
+        # ── 4. Execute UPDATE (safe against missing DB columns) ────────────
+        emp_columns = set()
+        try:
+            col_rows = execute_query(
+                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'employee'"
+            )
+            if col_rows:
+                emp_columns = {r["COLUMN_NAME"] for r in col_rows}
+        except Exception as col_err:
+            logger.warning(f"Could not check employee table columns: {col_err}")
+
+        valid_updates = {k: v for k, v in updates.items() if not emp_columns or k in emp_columns}
+        if not valid_updates:
+            return jsonify({
+                "success": False,
+                "error": "None of the provided fields exist in the employee table."
+            }), 400
+
+        set_clause = ", ".join(f"{col} = %s" for col in valid_updates)
+        values     = list(valid_updates.values()) + [emp_id]
 
         execute_query(
             f"UPDATE employee SET {set_clause} WHERE id = %s",
@@ -513,10 +530,13 @@ def update_employee(current_user, emp_id):
                 except Exception:
                     pass  # table may not have employee_name column
 
-            execute_query(
-                "UPDATE users SET original_name = %s WHERE employee_name = %s",
-                (new_name, new_name), commit=True
-            )
+            try:
+                execute_query(
+                    "UPDATE users SET original_name = %s WHERE employee_name = %s",
+                    (new_name, new_name), commit=True
+                )
+            except Exception:
+                pass
 
         # 5b. Sync email change → users.username (login credential)
         # CRITICAL: users.username IS the login email. Must stay in sync.
@@ -553,18 +573,22 @@ def update_employee(current_user, emp_id):
             except Exception as role_sync_err:
                 logger.warning(f"Failed to sync users.role for emp {emp_id}: {role_sync_err}")
 
-        # ── 6. Audit log ───────────────────────────────────────────────────
-        changed_fields = ", ".join(updates.keys())
-        execute_query(
-            "INSERT INTO audit_logs (user_id, event_type, description) VALUES (%s, %s, %s)",
-            (
-                current_user["user_id"],
-                "employee_update",
-                f"HR '{current_user['employee_name']}' updated employee ID {emp_id} "
-                f"(was: {old_name}). Fields changed: {changed_fields}."
-            ),
-            commit=True
-        )
+        # ── 6. Audit log (non-blocking) ───────────────────────────────────
+        changed_fields = ", ".join(valid_updates.keys())
+        try:
+            user_id = current_user.get("user_id") or 1
+            execute_query(
+                "INSERT INTO audit_logs (user_id, event_type, description) VALUES (%s, %s, %s)",
+                (
+                    user_id,
+                    "employee_update",
+                    f"HR '{current_user.get('employee_name', 'system')}' updated employee ID {emp_id} "
+                    f"(was: {old_name}). Fields changed: {changed_fields}."
+                ),
+                commit=True
+            )
+        except Exception as audit_err:
+            logger.warning(f"Audit log insertion skipped: {audit_err}")
 
         # ── 7. Return refreshed employee record ────────────────────────────
         refreshed = execute_single(
@@ -572,7 +596,7 @@ def update_employee(current_user, emp_id):
         )
 
         logger.info(
-            f"HR {current_user['employee_name']} updated employee ID {emp_id} "
+            f"HR {current_user.get('employee_name', 'system')} updated employee ID {emp_id} "
             f"({old_name}) — fields: {changed_fields}"
         )
 
@@ -584,7 +608,7 @@ def update_employee(current_user, emp_id):
 
     except Exception as e:
         logger.error(f"Error updating employee {emp_id}: {e}", exc_info=True)
-        return jsonify({"success": False, "error": "Internal server error"}), 500
+        return jsonify({"success": False, "error": f"Internal server error: {str(e)}"}), 500
 
 
 @employee_bp.route("/<int:emp_id>", methods=["DELETE"])
