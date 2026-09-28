@@ -413,13 +413,18 @@ def update_employee(current_user, emp_id):
 
         for date_field in ("date_of_birth", "date_of_joining"):
             if date_field in updates:
-                try:
-                    datetime.strptime(updates[date_field], "%Y-%m-%d")
-                except (TypeError, ValueError):
-                    return jsonify({
-                        "success": False,
-                        "error":   f"{date_field} must be in YYYY-MM-DD format."
-                    }), 400
+                val = updates[date_field]
+                if val is None or str(val).strip() == "":
+                    updates[date_field] = None
+                else:
+                    try:
+                        datetime.strptime(str(val).strip()[:10], "%Y-%m-%d")
+                        updates[date_field] = str(val).strip()[:10]
+                    except (TypeError, ValueError):
+                        return jsonify({
+                            "success": False,
+                            "error":   f"{date_field} must be in YYYY-MM-DD format."
+                        }), 400
 
         if "name" in updates:
             name_val = str(updates["name"]).strip()
