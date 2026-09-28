@@ -179,9 +179,14 @@ def _cta_button(text: str, url: str) -> str:
 def _leave_type_label(leave_type: str) -> str:
     """Convert DB leave type code to human-readable label."""
     labels = {
-        "sick":   "Sick Leave",
-        "casual": "Casual Leave",
-        "earned": "Earned / Privilege Leave",
+        "sick":            "Sick Leave",
+        "casual":          "Casual Leave",
+        "earned":          "Earned / Privilege Leave",
+        "planned":         "Planned Leave",
+        "unplanned":       "Unplanned Leave",
+        "optional":        "Optional Leave",
+        "work_from_home":  "Work From Home",
+        "wfh":             "Work From Home",
     }
     return labels.get(leave_type.lower(), leave_type.title())
 

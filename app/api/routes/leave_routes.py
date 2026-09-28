@@ -852,16 +852,12 @@ def apply_leave(current_user):
                 "error": "Selected range contains only weekends or holidays. Please select valid working days."
             }), 400
 
-        # ── Balance check ─────────────────────────────────────────────────
-        balance = execute_single("""
-            SELECT total_leaves, used_leaves,
-                   (total_leaves - used_leaves) AS remaining
-            FROM leave_balance
-            WHERE employee_name = %s AND leave_type = %s
-        """, (employee_name, leave_type))
+        # ── Work From Home (WFH) & Balance check ─────────────────────────
+        is_wfh = str(leave_type).strip().lower().replace(" ", "_") in ("work_from_home", "wfh")
+        req_type_name = "Work From Home" if is_wfh else f"{leave_type} leave"
+        req_title_prefix = "Work From Home" if is_wfh else "Leave"
 
-        if not balance:
-            allocate_default_leaves(employee_name)
+        if not is_wfh:
             balance = execute_single("""
                 SELECT total_leaves, used_leaves,
                        (total_leaves - used_leaves) AS remaining
@@ -869,19 +865,28 @@ def apply_leave(current_user):
                 WHERE employee_name = %s AND leave_type = %s
             """, (employee_name, leave_type))
 
-        if not balance:
-            return jsonify({"success": False, "error": f"Unknown leave type: {leave_type}"}), 400
+            if not balance:
+                allocate_default_leaves(employee_name)
+                balance = execute_single("""
+                    SELECT total_leaves, used_leaves,
+                           (total_leaves - used_leaves) AS remaining
+                    FROM leave_balance
+                    WHERE employee_name = %s AND leave_type = %s
+                """, (employee_name, leave_type))
 
-        remaining = Decimal(str(balance["remaining"]))
-        if duration > remaining:
-            return jsonify({
-                "success": False,
-                "error": (
-                    f"Insufficient {leave_type} leave balance. "
-                    f"Remaining: {float(remaining):.1f} days, "
-                    f"Requested: {float(duration):.1f} days."
-                )
-            }), 400
+            if not balance:
+                return jsonify({"success": False, "error": f"Unknown leave type: {leave_type}"}), 400
+
+            remaining = Decimal(str(balance["remaining"]))
+            if duration > remaining:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Insufficient {leave_type} leave balance. "
+                        f"Remaining: {float(remaining):.1f} days, "
+                        f"Requested: {float(duration):.1f} days."
+                    )
+                }), 400
 
         # ── Insert leave record (with requester_role) ─────────────────────
         execute_query("""
@@ -917,8 +922,8 @@ def apply_leave(current_user):
             if admin_name:
                 _notify(
                     admin_name,
-                    "Leave Request Pending Approval",
-                    f"{employee_name} ({target_role.upper()}) has applied for {leave_type} leave from {start_date} to {end_date}. Awaiting your approval.",
+                    f"{req_title_prefix} Request Pending Approval",
+                    f"{employee_name} ({target_role.upper()}) has applied for {req_type_name} from {start_date} to {end_date}. Awaiting your approval.",
                     "leave_pending",
                 )
         else:
@@ -927,8 +932,8 @@ def apply_leave(current_user):
             for pm in proj_managers:
                 _notify(
                     pm["manager_name"],
-                    "Leave Request Pending Project Sign-off",
-                    f"{employee_name} on project '{pm['project_name']}' has applied for {leave_type} leave from {start_date} to {end_date}. Awaiting your approval.",
+                    f"{req_title_prefix} Request Pending Project Sign-off",
+                    f"{employee_name} on project '{pm['project_name']}' has applied for {req_type_name} from {start_date} to {end_date}. Awaiting your approval.",
                     "leave_pending",
                 )
                 _email_leave_data = {
@@ -949,8 +954,8 @@ def apply_leave(current_user):
             # 2. Notify HR
             _notify_role_users(
                 "hr",
-                "Leave Request Pending HR Sign-off",
-                f"{employee_name} has applied for {leave_type} leave from {start_date} to {end_date}. Awaiting HR approval.",
+                f"{req_title_prefix} Request Pending HR Sign-off",
+                f"{employee_name} has applied for {req_type_name} from {start_date} to {end_date}. Awaiting HR approval.",
                 "leave_pending",
             )
 
@@ -958,14 +963,18 @@ def apply_leave(current_user):
         if leave_type_category == "half_day":
             period_label = " (First Half)" if half_day_period == "first_half" else " (Second Half)"
 
+        msg = f"{req_title_prefix} applied successfully — awaiting required sign-offs."
+        remaining_after = float(remaining - duration) if not is_wfh else None
+        note_text = f"{req_type_name}{period_label} for {float(duration):.1f} day(s) submitted."
+
         return jsonify({
             "success":                   True,
-            "message":                   "Leave applied successfully — awaiting required sign-offs.",
+            "message":                   msg,
             "leave_type_category":       leave_type_category,
             "half_day_period":           half_day_period,
             "duration_days":             float(duration),
-            "remaining_after_approval":  float(remaining - duration),
-            "note":                      f"{leave_type.title()} leave{period_label} for {float(duration):.1f} day(s) submitted.",
+            "remaining_after_approval":  remaining_after,
+            "note":                      note_text,
         }), 201
 
     except Exception as e:
@@ -995,9 +1004,11 @@ def approve_leave(current_user, leave_id):
         # If overall status is now fully approved:
         if result.get("is_final") and result.get("overall_status") == "approved":
             duration = _get_stored_duration(leave)
-            success = deduct_leave_balance(leave["employee_name"], leave["leave_type"], duration)
-            if not success:
-                return jsonify({"success": False, "error": "Insufficient leave balance — cannot approve"}), 400
+            is_wfh = str(leave.get("leave_type", "")).strip().lower().replace(" ", "_") in ("work_from_home", "wfh")
+            if not is_wfh:
+                success = deduct_leave_balance(leave["employee_name"], leave["leave_type"], duration)
+                if not success:
+                    return jsonify({"success": False, "error": "Insufficient leave balance — cannot approve"}), 400
 
             execute_query("""
                 UPDATE leaves 
@@ -1009,10 +1020,11 @@ def approve_leave(current_user, leave_id):
             """, (current_user["employee_name"], current_user["role"], leave_id), commit=True)
 
             _write_approval_history(leave_id, "approved", current_user["employee_name"], current_user["role"])
+            _req_type = "Work From Home" if is_wfh else f"{leave['leave_type']} leave"
             _notify(
                 leave["employee_name"],
-                "Leave Approved",
-                f"Your {leave['leave_type']} leave from {leave['start_date']} to {leave['end_date']} has been approved by all required reviewers.",
+                f"{'Work From Home' if is_wfh else 'Leave'} Approved",
+                f"Your {_req_type} from {leave['start_date']} to {leave['end_date']} has been approved by all required reviewers.",
                 "leave_approved"
             )
             log_audit_event(current_user["user_id"], "leave_approval", f"Fully approved leave ID {leave_id} for {leave['employee_name']}")
@@ -1132,13 +1144,16 @@ def update_leave_status_api(current_user, leave_id):
             return jsonify({"success": True, "message": "No change needed"}), 200
 
         duration = _get_stored_duration(leave)
+        is_wfh = str(leave.get("leave_type", "")).strip().lower().replace(" ", "_") in ("work_from_home", "wfh")
 
         if new_status == "approved" and old_status != "approved":
-            success = deduct_leave_balance(leave["employee_name"], leave["leave_type"], duration)
-            if not success:
-                return jsonify({"success": False, "error": "Employee does not have enough remaining leave balance."}), 400
+            if not is_wfh:
+                success = deduct_leave_balance(leave["employee_name"], leave["leave_type"], duration)
+                if not success:
+                    return jsonify({"success": False, "error": "Employee does not have enough remaining leave balance."}), 400
         elif old_status == "approved" and new_status != "approved":
-            refund_leave_balance(leave["employee_name"], leave["leave_type"], duration)
+            if not is_wfh:
+                refund_leave_balance(leave["employee_name"], leave["leave_type"], duration)
 
         execute_query(
             """
@@ -1211,8 +1226,10 @@ def delete_leave(current_user, leave_id):
 
         # If leave was approved, refund balance
         if leave["status"] == "approved":
-            duration = _get_stored_duration(leave)
-            refund_leave_balance(leave["employee_name"], leave["leave_type"], duration)
+            is_wfh = str(leave.get("leave_type", "")).strip().lower().replace(" ", "_") in ("work_from_home", "wfh")
+            if not is_wfh:
+                duration = _get_stored_duration(leave)
+                refund_leave_balance(leave["employee_name"], leave["leave_type"], duration)
 
         execute_query("DELETE FROM leave_signoffs WHERE leave_id = %s", (leave_id,), commit=True)
         execute_query("DELETE FROM leave_approval_history WHERE leave_id = %s", (leave_id,), commit=True)
