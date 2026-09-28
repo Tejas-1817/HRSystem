@@ -187,14 +187,17 @@ def credit_quarter_for_employee(
 # ---------------------------------------------------------------------------
 
 def _get_eligible_employees() -> List[Dict[str, Any]]:
-    """Return all active Full Time employees with their date_of_joining."""
+    """Return all active Full Time and legacy employees with their date_of_joining."""
     return execute_query("""
-        SELECT e.name AS employee_name, e.date_of_joining
+        SELECT e.name AS employee_name, 
+               COALESCE(e.date_of_joining, DATE(e.created_at), CURDATE()) AS date_of_joining
         FROM employee e
-        JOIN users u ON u.employee_name = e.name
-        WHERE u.is_active = TRUE
-          AND e.employment_type = %s
-          AND e.date_of_joining IS NOT NULL
+        LEFT JOIN users u ON (u.employee_name = e.name OR u.username = e.name)
+        WHERE (u.is_active IS NULL OR u.is_active = TRUE OR u.is_active = 1)
+          AND (e.employment_type = %s 
+               OR e.employment_type IS NULL 
+               OR e.employment_type = '' 
+               OR LOWER(TRIM(e.employment_type)) IN ('full time', 'full-time', 'full_time', 'permanent'))
         ORDER BY e.name
     """, (ELIGIBLE_EMPLOYMENT_TYPE,))
 
