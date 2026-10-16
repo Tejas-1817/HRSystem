@@ -57,7 +57,7 @@ def get_software(current_user):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @software_bp.route("/", methods=["POST"], strict_slashes=False)
-@role_required(["admin", "superadmin", "system_admin"])
+@role_required(["admin", "superadmin", "system_admin", "hr"])
 def add_software(current_user):
     try:
         data = request.get_json() or {}
