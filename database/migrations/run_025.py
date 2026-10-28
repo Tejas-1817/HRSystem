@@ -92,6 +92,8 @@ SEED_PERMISSIONS = [
     ("team_members.update", "team_members", "Update Team Member", "PATCH /<id>", ["hr", "admin"]),
     ("team_members.delete", "team_members", "Delete Team Member", "DELETE /<id>", ["admin"]),
     ("team_members.allocation_config", "team_members", "Update Team Member Allocation Config", "PATCH /<id>/allocation-config", ["hr", "manager", "admin"]),
+    ("timesheets.view", "timesheets", "View Timesheets", "GET /timesheets/", ["hr", "manager", "admin"]),
+    ("timesheets.manage", "timesheets", "Manage Timesheets", "PATCH /timesheets/<id>/review", ["manager", "admin"]),
 ]
 
 CONFIGURABLE_ROLES = ['superadmin', 'admin', 'hr', 'manager', 'employee', 'team_member', 'onboarding_candidate']

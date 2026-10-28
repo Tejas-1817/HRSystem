@@ -214,6 +214,11 @@ FEATURE_PERMISSION_MAP = {
         "view": ["reports.resource_utilization", "reports.billing_ratio", "reports.over_allocated", "reports.project_billing"],
         "manage": ["reports.resource_utilization", "reports.billing_ratio", "reports.over_allocated", "reports.project_billing"],
     },
+    # 18. Timesheets
+    "timesheets": {
+        "view": ["timesheets.view"],
+        "manage": ["timesheets.manage"],
+    },
 }
 
 def normalize_role(role):

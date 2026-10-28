@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify, send_file
 from datetime import datetime, date, timedelta
 from app.models.database import execute_query, execute_single
-from app.api.middleware.auth import token_required, role_required
+from app.api.middleware.auth import token_required, role_required, has_permission
 from app.services.timesheet_service import (
     approve_timesheet as svc_approve,
     reject_timesheet as svc_reject,
@@ -134,6 +134,9 @@ def get_timesheet_managers(current_user):
 @token_required
 def view_timesheets(current_user):
     try:
+        if not has_permission(current_user, "timesheets", "view"):
+            return jsonify({"success": False, "error": "Access denied. Missing permission: timesheets.view"}), 403
+
         if current_user["role"] in ("admin", "hr", "superadmin"):
             rows = execute_query("""
                 SELECT t.*, p.project_id
@@ -793,6 +796,9 @@ def bulk_delete_timesheets(current_user):
 @token_required
 def bulk_approve_timesheets(current_user):
     try:
+        if not has_permission(current_user, "timesheets", "manage"):
+            return jsonify({"success": False, "error": "Access denied. Missing permission: timesheets.manage"}), 403
+
         data = request.get_json() or {}
         ids = data.get("ids") or []
         comments = data.get("comments") or data.get("manager_comments")
@@ -830,6 +836,9 @@ def bulk_approve_timesheets(current_user):
 @token_required
 def bulk_reject_timesheets(current_user):
     try:
+        if not has_permission(current_user, "timesheets", "manage"):
+            return jsonify({"success": False, "error": "Access denied. Missing permission: timesheets.manage"}), 403
+
         data = request.get_json() or {}
         ids = data.get("ids") or []
         reason = data.get("reason") or data.get("comments") or data.get("manager_comments") or "Bulk rejected by manager"
@@ -868,6 +877,9 @@ def bulk_reject_timesheets(current_user):
 def review_timesheet(current_user, entry_id):
     """Review (approve/reject) a timesheet entry. RBAC enforced by service layer."""
     try:
+        if not has_permission(current_user, "timesheets", "manage"):
+            return jsonify({"success": False, "error": "Access denied. Missing permission: timesheets.manage"}), 403
+
         data = request.get_json() or {}
         action = data.get("action")  # "approved" | "rejected"
         if action not in ("approved", "rejected"):
@@ -896,6 +908,9 @@ def review_timesheet(current_user, entry_id):
 def approve_timesheet(current_user, entry_id):
     """Approve a pending timesheet entry. RBAC enforced by service layer."""
     try:
+        if not has_permission(current_user, "timesheets", "manage"):
+            return jsonify({"success": False, "error": "Access denied. Missing permission: timesheets.manage"}), 403
+
         data = request.get_json() or {}
         comments = data.get("comments") or data.get("manager_comments")
 
@@ -915,6 +930,9 @@ def approve_timesheet(current_user, entry_id):
 def reject_timesheet(current_user, entry_id):
     """Reject a timesheet entry. RBAC enforced by service layer."""
     try:
+        if not has_permission(current_user, "timesheets", "manage"):
+            return jsonify({"success": False, "error": "Access denied. Missing permission: timesheets.manage"}), 403
+
         data = request.get_json() or {}
         reason = data.get("reason") or data.get("comments") or data.get("manager_comments")
 

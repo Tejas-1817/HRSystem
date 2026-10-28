@@ -40,7 +40,12 @@ def validate_approval_authority(approver: dict, timesheet: dict) -> tuple[bool, 
     if approver_name == owner_name:
         return False, "Self-approval is not permitted. Timesheets must be reviewed by an authorised approver."
 
-    # ── 2. Employee cannot approve anything ───────────────────────────────
+    # ── 2. Manage Timesheets permission enforcement ───────────────────────
+    from app.api.middleware.auth import has_permission
+    if not has_permission(approver, "timesheets", "manage"):
+        return False, "You do not have permission to manage (approve/reject) timesheets."
+
+    # ── 3. Employee cannot approve anything ───────────────────────────────
     if approver_role == "employee":
         return False, "Employees do not have timesheet approval permissions."
 
