@@ -43,50 +43,77 @@ def get_permissions(current_user):
         logger.error(f"Error fetching permissions: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
-@superadmin_bp.route("/admin/permissions/<int:permission_id>/role/<string:role>", methods=["PATCH"])
+@superadmin_bp.route("/admin/permissions/<int:permission_id>/role/<string:role>", methods=["PATCH", "POST", "PUT"])
 @superadmin_required
 def toggle_permission(current_user, permission_id, role):
     """
     Toggle a permission grant for a specific role.
     """
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         is_granted = bool(data.get("is_granted") if "is_granted" in data else data.get("granted"))
         
         with Transaction() as cursor:
-            # Check current state
+            # 1. Verify that permission exists
+            cursor.execute("SELECT id FROM permissions WHERE id = %s", (permission_id,))
+            perm_exists = cursor.fetchone()
+            if not perm_exists:
+                return jsonify({"success": False, "error": f"Permission ID {permission_id} not found"}), 404
+
+            # 2. Safely resolve a valid user_id for foreign keys
+            user_id = current_user.get("user_id") or current_user.get("id")
+            if user_id:
+                cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+                if not cursor.fetchone():
+                    user_id = None
+            if not user_id:
+                cursor.execute("SELECT id FROM users WHERE role = 'superadmin' OR role = 'admin' ORDER BY id ASC LIMIT 1")
+                admin_row = cursor.fetchone()
+                user_id = admin_row["id"] if admin_row else 1
+
+            changed_by_name = current_user.get("employee_name") or current_user.get("username") or "Super Admin"
+
+            # 3. Check current state in role_permissions
             cursor.execute("SELECT is_granted FROM role_permissions WHERE permission_id = %s AND role = %s", (permission_id, role))
             existing = cursor.fetchone()
             
             if not existing:
-                return jsonify({"success": False, "error": "Permission or role not found"}), 404
-                
-            old_value = bool(existing["is_granted"])
-            
-            if old_value != is_granted:
-                user_id = current_user.get("user_id") or 11
-                changed_by_name = current_user.get("employee_name") or current_user.get("username") or "Super Admin"
-                # Update
+                # Permission mapping didn't exist yet for this role: insert new mapping
+                old_value = False
                 cursor.execute("""
-                    UPDATE role_permissions 
-                    SET is_granted = %s, updated_by = %s 
-                    WHERE permission_id = %s AND role = %s
-                """, (is_granted, user_id, permission_id, role))
+                    INSERT INTO role_permissions (role, permission_id, is_granted, updated_by)
+                    VALUES (%s, %s, %s, %s)
+                """, (role, permission_id, is_granted, user_id))
                 
-                # Audit log
                 cursor.execute("""
                     INSERT INTO role_permission_audit_log 
                     (role, permission_id, old_value, new_value, changed_by, changed_by_name)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (role, permission_id, old_value, is_granted, user_id, changed_by_name))
+            else:
+                old_value = bool(existing["is_granted"])
+                if old_value != is_granted:
+                    # Update existing mapping
+                    cursor.execute("""
+                        UPDATE role_permissions 
+                        SET is_granted = %s, updated_by = %s 
+                        WHERE permission_id = %s AND role = %s
+                    """, (is_granted, user_id, permission_id, role))
+                    
+                    # Audit log
+                    cursor.execute("""
+                        INSERT INTO role_permission_audit_log 
+                        (role, permission_id, old_value, new_value, changed_by, changed_by_name)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (role, permission_id, old_value, is_granted, user_id, changed_by_name))
                 
         # Refresh the cache in process
         refresh_permissions_cache()
         
         return jsonify({"success": True, "message": "Permission updated successfully"}), 200
     except Exception as e:
-        logger.error(f"Error toggling permission: {e}")
-        return jsonify({"success": False, "error": "Internal server error"}), 500
+        logger.error(f"Error toggling permission: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @superadmin_bp.route("/admin/permissions/reset-defaults", methods=["POST"])
 @superadmin_required

@@ -872,7 +872,7 @@ def bulk_reject_timesheets(current_user):
 # PATCH /timesheets/<id>/review — canonical review endpoint (RBAC in service)
 # ---------------------------------------------------------------------------
 
-@timesheet_bp.route("/<int:entry_id>/review", methods=["PATCH"])
+@timesheet_bp.route("/<int:entry_id>/review", methods=["PATCH", "POST", "PUT"], strict_slashes=False)
 @token_required
 def review_timesheet(current_user, entry_id):
     """Review (approve/reject) a timesheet entry. RBAC enforced by service layer."""
@@ -880,8 +880,8 @@ def review_timesheet(current_user, entry_id):
         if not has_permission(current_user, "timesheets", "manage"):
             return jsonify({"success": False, "error": "Access denied. Missing permission: timesheets.manage"}), 403
 
-        data = request.get_json() or {}
-        action = data.get("action")  # "approved" | "rejected"
+        data = request.get_json(silent=True) or {}
+        action = data.get("action") or data.get("status")  # accept both action and status
         if action not in ("approved", "rejected"):
             return jsonify({"success": False, "error": "action must be 'approved' or 'rejected'"}), 400
 
@@ -903,7 +903,7 @@ def review_timesheet(current_user, entry_id):
 # PUT & POST /timesheets/<id>/approve — convenience wrapper (RBAC in service)
 # ---------------------------------------------------------------------------
 
-@timesheet_bp.route("/<int:entry_id>/approve", methods=["PUT", "POST"])
+@timesheet_bp.route("/<int:entry_id>/approve", methods=["PUT", "POST", "PATCH"], strict_slashes=False)
 @token_required
 def approve_timesheet(current_user, entry_id):
     """Approve a pending timesheet entry. RBAC enforced by service layer."""
@@ -911,7 +911,7 @@ def approve_timesheet(current_user, entry_id):
         if not has_permission(current_user, "timesheets", "manage"):
             return jsonify({"success": False, "error": "Access denied. Missing permission: timesheets.manage"}), 403
 
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         comments = data.get("comments") or data.get("manager_comments")
 
         result = svc_approve(current_user, entry_id, comments)
@@ -925,7 +925,7 @@ def approve_timesheet(current_user, entry_id):
 # PUT & POST /timesheets/<id>/reject — convenience wrapper (RBAC in service)
 # ---------------------------------------------------------------------------
 
-@timesheet_bp.route("/<int:entry_id>/reject", methods=["PUT", "POST"])
+@timesheet_bp.route("/<int:entry_id>/reject", methods=["PUT", "POST", "PATCH"], strict_slashes=False)
 @token_required
 def reject_timesheet(current_user, entry_id):
     """Reject a timesheet entry. RBAC enforced by service layer."""
@@ -933,7 +933,7 @@ def reject_timesheet(current_user, entry_id):
         if not has_permission(current_user, "timesheets", "manage"):
             return jsonify({"success": False, "error": "Access denied. Missing permission: timesheets.manage"}), 403
 
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         reason = data.get("reason") or data.get("comments") or data.get("manager_comments")
 
         if not reason:
