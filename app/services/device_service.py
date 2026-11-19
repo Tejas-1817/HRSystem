@@ -39,8 +39,11 @@ def list_devices(filters: dict = None) -> list:
 
     if filters:
         if filters.get("status"):
-            conditions.append("d.status = %s")
-            params.append(filters["status"])
+            if filters["status"].lower() == "active":
+                conditions.append("d.status NOT IN ('Returned to Vendor', 'Retired')")
+            else:
+                conditions.append("d.status = %s")
+                params.append(filters["status"])
         if filters.get("brand"):
             conditions.append("d.brand = %s")
             params.append(filters["brand"])
@@ -409,8 +412,8 @@ def return_device_enterprise(
         """, (
             performer_id,
             "ASSET_RETURNED",
-            f"{returned_by} returned device {device_label} "
-            f"from {assigned_employee}.{reason_text}",
+            f"{returned_by} returned device {device_label} to inventory "
+            f"from previous owner: {assigned_employee}.{reason_text}",
             ip_address,
             user_agent,
         ))
@@ -421,8 +424,8 @@ def return_device_enterprise(
             VALUES (%s, %s, %s, 'device_return')
         """, (
             assigned_employee,
-            "Device Returned",
-            f"Your {device_label} has been returned by {returned_by}. "
+            "Device Returned to Inventory",
+            f"Your {device_label} has been returned to inventory by {returned_by}. "
             f"The device has been removed from your profile.{reason_text}",
         ))
 
@@ -434,8 +437,8 @@ def return_device_enterprise(
             WHERE u.role IN ('hr', 'admin')
               AND u.employee_name != %s
         """, (
-            "Asset Return Processed",
-            f"{returned_by} has returned {device_label} "
+            "Asset Return to Inventory Processed",
+            f"{returned_by} returned {device_label} to inventory "
             f"(previously assigned to {assigned_employee}).{reason_text}",
             returned_by,
         ))
@@ -444,11 +447,11 @@ def return_device_enterprise(
     _log_stock(
         device_id, device.get("catalog_id"), "returned", returned_by,
         old_status="Assigned", new_status="Available",
-        notes=f"Returned from {assigned_employee}. {reason_text}".strip(),
+        notes=f"Returned to inventory from previous owner {assigned_employee}. {reason_text}".strip(),
     )
 
     logger.info(
-        "ASSET_RETURNED: device_id=%s label=%s from=%s by=%s reason=%s",
+        "ASSET_RETURNED_TO_INVENTORY: device_id=%s label=%s from=%s by=%s reason=%s",
         device_id, device_label, assigned_employee, returned_by, return_reason,
     )
 
@@ -458,9 +461,189 @@ def return_device_enterprise(
         "asset_status": "AVAILABLE",
         "available_for_assignment": True,
         "returned_by": returned_by,
+        "previous_owner": assigned_employee,
         "returned_from": assigned_employee,
         "returned_at": datetime.now().strftime("%Y-%m-%d"),
         "return_reason": return_reason,
+    }
+
+
+def return_device_to_vendor_enterprise(
+    device_id: int,
+    returned_by: str,
+    return_reason: str,
+    return_date: str = None,
+    vendor_reference: str = None,
+    ip_address: str = None,
+    user_agent: str = None,
+) -> dict:
+    """
+    Enterprise-grade Return to Vendor workflow.
+
+    Performs all steps inside a single database transaction with automatic rollback.
+    - Status set to 'Returned to Vendor'.
+    - Removed from Active Assets listing (leaves company inventory).
+    - Preserves asset record and complete transaction history (not deleted).
+    - Disallows future employee assignment.
+    - Captures mandatory return reason, return date, optional vendor reference.
+    - Closes any active employee assignment and logs previous owner.
+    - Audit log + stock log + notifications.
+    - Prevents accidental duplicate return transactions.
+    """
+    if not return_reason or not return_reason.strip():
+        raise ValueError("Return reason is mandatory.")
+
+    # Normalize return date
+    if not return_date or not return_date.strip():
+        return_date = datetime.now().strftime("%Y-%m-%d")
+    else:
+        return_date = return_date.strip()
+        try:
+            datetime.strptime(return_date, "%Y-%m-%d")
+        except ValueError:
+            return_date = datetime.now().strftime("%Y-%m-%d")
+
+    if vendor_reference:
+        vendor_reference = vendor_reference.strip() or None
+
+    with Transaction() as cursor:
+        # Step 1: Validate device exists (row-locked for transaction isolation)
+        cursor.execute(
+            "SELECT * FROM devices WHERE id = %s AND is_deleted = FALSE FOR UPDATE",
+            (device_id,),
+        )
+        device = cursor.fetchone()
+        if not device:
+            raise LookupError("Device not found.")
+
+        device_label = f"{device['brand']} {device['model']} (SN: {device['serial_number']})"
+
+        # Step 2: Prevent duplicate returns or invalid state
+        if device["status"] == "Returned to Vendor":
+            raise LookupError("CONFLICT:Asset has already been returned to vendor.")
+        if device["status"] == "Retired":
+            raise LookupError("CONFLICT:Asset is retired and cannot be returned to vendor.")
+
+        # Step 3: Find active assignment (if any) or last owner
+        cursor.execute("""
+            SELECT da.*, e.id AS employee_pk
+            FROM device_assignments da
+            LEFT JOIN employee e ON da.employee_name = e.name
+            WHERE da.device_id = %s AND da.returned_date IS NULL
+            ORDER BY da.assigned_date DESC
+            LIMIT 1
+        """, (device_id,))
+        active_assignment = cursor.fetchone()
+
+        assigned_employee = active_assignment["employee_name"] if active_assignment else None
+
+        if active_assignment:
+            # Close active assignment
+            cursor.execute("""
+                UPDATE device_assignments
+                SET returned_date  = %s,
+                    returned_by    = %s,
+                    return_reason  = %s,
+                    acceptance_status = CASE
+                        WHEN acceptance_status = 'pending' THEN 'rejected'
+                        ELSE acceptance_status
+                    END
+                WHERE id = %s
+            """, (return_date, returned_by, f"[Return to Vendor] {return_reason}", active_assignment["id"]))
+            previous_owner = assigned_employee
+        else:
+            # Query last assignment to preserve previous owner in audit log
+            cursor.execute("""
+                SELECT employee_name FROM device_assignments
+                WHERE device_id = %s
+                ORDER BY assigned_date DESC LIMIT 1
+            """, (device_id,))
+            last_assign = cursor.fetchone()
+            previous_owner = last_assign["employee_name"] if last_assign else "None (Unassigned)"
+
+        # Step 4: Update device status to 'Returned to Vendor'
+        cursor.execute("""
+            UPDATE devices
+            SET status = 'Returned to Vendor',
+                vendor_return_date = %s,
+                vendor_return_reason = %s,
+                vendor_return_reference = %s,
+                updated_at = NOW()
+            WHERE id = %s
+        """, (return_date, return_reason, vendor_reference, device_id))
+
+        # Step 5: Audit log
+        cursor.execute(
+            "SELECT id FROM employee WHERE name = %s LIMIT 1",
+            (returned_by,),
+        )
+        performer = cursor.fetchone()
+        performer_id = performer["id"] if performer else 0
+
+        ref_text = f" (Vendor Ref: {vendor_reference})" if vendor_reference else ""
+        audit_description = (
+            f"{returned_by} returned device {device_label} to vendor on {return_date}. "
+            f"Previous Owner: {previous_owner}. Reason: {return_reason}{ref_text}"
+        )
+        cursor.execute("""
+            INSERT INTO audit_logs
+                (user_id, event_type, description, ip_address, user_agent)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (
+            performer_id,
+            "ASSET_RETURNED_TO_VENDOR",
+            audit_description,
+            ip_address,
+            user_agent,
+        ))
+
+        # Step 6: Notify assigned employee (if any)
+        if assigned_employee:
+            cursor.execute("""
+                INSERT INTO notifications (employee_name, title, message, type)
+                VALUES (%s, %s, %s, 'device_return_vendor')
+            """, (
+                assigned_employee,
+                "Device Returned to Vendor",
+                f"Your {device_label} has been returned to the vendor by {returned_by}. "
+                f"The device has been removed from your profile. Reason: {return_reason}",
+            ))
+
+        # Step 7: Notify HR / Admins
+        cursor.execute("""
+            INSERT INTO notifications (employee_name, title, message, type)
+            SELECT DISTINCT u.employee_name, %s, %s, 'device_return_vendor'
+            FROM users u
+            WHERE u.role IN ('hr', 'admin')
+              AND u.employee_name != %s
+        """, (
+            "Asset Returned to Vendor",
+            f"{returned_by} returned {device_label} to vendor (Previous Owner: {previous_owner}). Reason: {return_reason}{ref_text}",
+            returned_by,
+        ))
+
+    # Step 8: Log stock event (outside transaction)
+    _log_stock(
+        device_id, device.get("catalog_id"), "returned_to_vendor", returned_by,
+        old_status=device.get("status"), new_status="Returned to Vendor",
+        notes=f"Returned to vendor on {return_date}. Previous Owner: {previous_owner}. Reason: {return_reason}{ref_text}".strip(),
+    )
+
+    logger.info(
+        "ASSET_RETURNED_TO_VENDOR: device_id=%s label=%s prev_owner=%s by=%s date=%s reason=%s ref=%s",
+        device_id, device_label, previous_owner, returned_by, return_date, return_reason, vendor_reference,
+    )
+
+    return {
+        "device_id": device_id,
+        "device_label": device_label,
+        "asset_status": "Returned to Vendor",
+        "available_for_assignment": False,
+        "returned_by": returned_by,
+        "previous_owner": previous_owner,
+        "return_date": str(return_date),
+        "return_reason": return_reason,
+        "vendor_reference": vendor_reference,
     }
 
 
@@ -479,9 +662,10 @@ def return_device(device_id: int) -> bool:
 
 
 def get_device_history(device_id: int) -> dict:
-    """Return assignment history (with employee details) and related helpdesk tickets."""
+    """Return assignment history (with employee details), related helpdesk tickets, and complete audit timeline."""
     assignments = execute_query("""
         SELECT da.employee_name, da.assigned_date, da.returned_date,
+               da.returned_by, da.return_reason,
                da.acceptance_status,
                e.id AS employee_id,
                e.email AS employee_email,
@@ -505,11 +689,54 @@ def get_device_history(device_id: int) -> dict:
     """, (device_id,))
     
     for t in tickets:
-        t["created_at"] = t["created_at"].isoformat()
+        if hasattr(t.get("created_at"), "isoformat"):
+            t["created_at"] = t["created_at"].isoformat()
+
+    # Build complete timeline from stock logs & assignments
+    stock_events = execute_query("""
+        SELECT action, old_status, new_status, performed_by, notes, created_at
+        FROM asset_stock_log
+        WHERE device_id = %s
+        ORDER BY created_at DESC
+    """, (device_id,))
+
+    timeline = []
+    for s in stock_events:
+        ts = s["created_at"].isoformat() if hasattr(s.get("created_at"), "isoformat") else str(s.get("created_at") or "")
+        action_name = (s.get("action") or "status_change").replace("_", " ").title()
+        timeline.append({
+            "action": action_name,
+            "timestamp": ts,
+            "details": s.get("notes") or f"Status changed from {s.get('old_status')} to {s.get('new_status')}",
+            "performed_by": s.get("performed_by") or "System",
+            "old_status": s.get("old_status"),
+            "new_status": s.get("new_status")
+        })
+
+    # Also include assignment events in timeline if not already covered
+    for a in assignments:
+        if a.get("returned_date"):
+            timeline.append({
+                "action": "Return Processed",
+                "timestamp": str(a.get("returned_date")),
+                "details": f"Returned by {a.get('returned_by') or 'HR/Admin'}. Reason: {a.get('return_reason') or 'None specified'}. Previous owner: {a.get('employee_name')}",
+                "performed_by": a.get("returned_by") or "System",
+            })
+        if a.get("assigned_date"):
+            timeline.append({
+                "action": "Asset Assigned",
+                "timestamp": str(a.get("assigned_date")),
+                "details": f"Assigned to {a.get('employee_name')} (Acceptance: {a.get('acceptance_status') or 'pending'})",
+                "performed_by": "System",
+            })
+
+    # Sort timeline by timestamp desc
+    timeline.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
 
     return {
         "assignments": assignments,
-        "tickets": tickets
+        "tickets": tickets,
+        "timeline": timeline,
     }
 
 
@@ -704,7 +931,10 @@ def update_device_enterprise(
         "rental_cost_frequency": "Rental Cost Frequency",
         "purchase_date": "Purchase Date",
         "warranty_expiry": "Warranty Expiry",
-        "next_due_date": "Next Due Date"
+        "next_due_date": "Next Due Date",
+        "vendor_return_date": "Vendor Return Date",
+        "vendor_return_reason": "Vendor Return Reason",
+        "vendor_return_reference": "Vendor Return Reference"
     }
 
     # Automatically calculate next_due_date if rental_start_date changed

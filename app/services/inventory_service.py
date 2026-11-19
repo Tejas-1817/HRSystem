@@ -33,10 +33,11 @@ def get_inventory_dashboard() -> dict:
     totals = execute_single("""
         SELECT
             COUNT(*) AS total,
-            SUM(status = 'Available')    AS available,
-            SUM(status = 'Assigned')     AS assigned,
-            SUM(status = 'Under Repair') AS under_repair,
-            SUM(status = 'Retired')      AS retired
+            SUM(status = 'Available')          AS available,
+            SUM(status = 'Assigned')           AS assigned,
+            SUM(status = 'Under Repair')       AS under_repair,
+            SUM(status = 'Retired')            AS retired,
+            SUM(status = 'Returned to Vendor') AS returned_to_vendor
         FROM devices WHERE is_deleted = FALSE
     """)
 
@@ -44,10 +45,11 @@ def get_inventory_dashboard() -> dict:
     by_category = execute_query("""
         SELECT device_type AS category,
             COUNT(*) AS total,
-            SUM(status = 'Available')    AS available,
-            SUM(status = 'Assigned')     AS assigned,
-            SUM(status = 'Under Repair') AS under_repair,
-            SUM(status = 'Retired')      AS retired
+            SUM(status = 'Available')          AS available,
+            SUM(status = 'Assigned')           AS assigned,
+            SUM(status = 'Under Repair')       AS under_repair,
+            SUM(status = 'Retired')            AS retired,
+            SUM(status = 'Returned to Vendor') AS returned_to_vendor
         FROM devices WHERE is_deleted = FALSE
         GROUP BY device_type ORDER BY device_type
     """)
@@ -56,9 +58,11 @@ def get_inventory_dashboard() -> dict:
     by_brand = execute_query("""
         SELECT brand,
             COUNT(*) AS total,
-            SUM(status = 'Available')    AS available,
-            SUM(status = 'Assigned')     AS assigned,
-            SUM(status = 'Under Repair') AS under_repair
+            SUM(status = 'Available')          AS available,
+            SUM(status = 'Assigned')           AS assigned,
+            SUM(status = 'Under Repair')       AS under_repair,
+            SUM(status = 'Retired')            AS retired,
+            SUM(status = 'Returned to Vendor') AS returned_to_vendor
         FROM devices WHERE is_deleted = FALSE
         GROUP BY brand ORDER BY brand
     """)
@@ -95,10 +99,11 @@ def get_stock_by_catalog(catalog_id: int) -> dict:
     counts = execute_single("""
         SELECT
             COUNT(*) AS total,
-            SUM(status = 'Available')    AS available,
-            SUM(status = 'Assigned')     AS assigned,
-            SUM(status = 'Under Repair') AS under_repair,
-            SUM(status = 'Retired')      AS retired
+            SUM(status = 'Available')          AS available,
+            SUM(status = 'Assigned')           AS assigned,
+            SUM(status = 'Under Repair')       AS under_repair,
+            SUM(status = 'Retired')            AS retired,
+            SUM(status = 'Returned to Vendor') AS returned_to_vendor
         FROM devices
         WHERE catalog_id = %s AND is_deleted = FALSE
     """, (catalog_id,))
@@ -150,10 +155,11 @@ def list_catalog() -> list[dict]:
     rows = execute_query("""
         SELECT ac.*,
                COUNT(d.id) AS total_units,
-               COALESCE(SUM(d.status = 'Available'), 0)    AS available,
-               COALESCE(SUM(d.status = 'Assigned'), 0)     AS assigned,
-               COALESCE(SUM(d.status = 'Under Repair'), 0) AS under_repair,
-               COALESCE(SUM(d.status = 'Retired'), 0)      AS retired
+               COALESCE(SUM(d.status = 'Available'), 0)          AS available,
+               COALESCE(SUM(d.status = 'Assigned'), 0)           AS assigned,
+               COALESCE(SUM(d.status = 'Under Repair'), 0)       AS under_repair,
+               COALESCE(SUM(d.status = 'Retired'), 0)            AS retired,
+               COALESCE(SUM(d.status = 'Returned to Vendor'), 0) AS returned_to_vendor
         FROM asset_catalog ac
         LEFT JOIN devices d ON d.catalog_id = ac.id AND d.is_deleted = FALSE
         GROUP BY ac.id
@@ -224,7 +230,7 @@ def update_device_status(device_id: int, new_status: str, performed_by: str, not
       Under Repair → Available, Retired
       Retired   → (no transitions — end of life)
     """
-    valid_statuses = ("Available", "Assigned", "Under Repair", "Retired")
+    valid_statuses = ("Available", "Assigned", "Under Repair", "Retired", "Returned to Vendor")
     if new_status not in valid_statuses:
         raise ValueError(f"Invalid status '{new_status}'. Must be one of: {', '.join(valid_statuses)}")
 
@@ -236,8 +242,8 @@ def update_device_status(device_id: int, new_status: str, performed_by: str, not
     if old_status == new_status:
         raise ValueError(f"Device is already '{new_status}'.")
 
-    if old_status == "Retired":
-        raise ValueError("Cannot change status of a retired device.")
+    if old_status in ("Retired", "Returned to Vendor"):
+        raise ValueError(f"Cannot change status of a {old_status.lower()} device.")
 
     # Map transition to stock log action
     action_map = {
