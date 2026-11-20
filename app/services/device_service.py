@@ -254,14 +254,15 @@ def create_device(data: dict) -> int:
 
 def assign_device(device_id: int, employee_name: str) -> bool:
     """Assign device to an employee, set pending acceptance, and notify.
-    CRITICAL: blocks assignment unless device status is 'Available'."""
+    Allows assignment for Available assets and re-assignment for Assigned assets.
+    CRITICAL: blocks assignment if device status is 'Returned to Vendor', 'Retired', or 'Under Repair'."""
     with Transaction() as cursor:
-        # Check if device is available — MUST be 'Available' to assign
+        # Check if device is eligible for assignment
         cursor.execute("SELECT * FROM devices WHERE id = %s AND is_deleted = FALSE", (device_id,))
         device = cursor.fetchone()
         if not device:
             return False
-        if device["status"] != "Available":
+        if device["status"] not in ("Available", "Assigned"):
             logger.warning(f"BLOCK: assign attempt on device {device_id} with status '{device['status']}'")
             return False
 
@@ -790,15 +791,14 @@ def get_employee_devices(employee_name: str) -> list:
 
 def soft_delete_device(device_id: int, deleted_by: str) -> dict:
     """
-    Soft-delete a device after validating it is safe to remove.
+    Soft-delete a device record.
 
-    Blocks deletion if:
-      - Device is currently assigned to an employee
-      - Device is under repair
-      - Device has open/in-progress helpdesk tickets
+    If the device is currently assigned, closes the active assignment cleanly.
+    If the device has open helpdesk tickets, closes them.
 
     On success:
-      - Sets is_deleted=TRUE, records who deleted and when
+      - Sets is_deleted=TRUE, records who deleted and when, status='Retired'
+      - Releases any active assignments with audit reason
       - Creates audit log entry
       - Returns summary of the deleted device
     """
@@ -812,39 +812,38 @@ def soft_delete_device(device_id: int, deleted_by: str) -> dict:
 
     device_label = f"{device['brand']} {device['model']} (SN: {device['serial_number']})"
 
-    # 2. Block if currently assigned
+    # Check for active assignment
     active_assignment = execute_single("""
         SELECT id, employee_name FROM device_assignments
         WHERE device_id = %s AND returned_date IS NULL
     """, (device_id,))
-    if active_assignment:
-        raise ValueError(
-            f"Cannot delete — device is currently assigned to "
-            f"{active_assignment['employee_name']}. "
-            f"Please return the device first."
-        )
+    assigned_name = active_assignment["employee_name"] if active_assignment else None
 
-    # 3. Block if under repair
-    if device["status"] == "Under Repair":
-        raise ValueError(
-            "Cannot delete — device is currently under repair. "
-            "Please resolve the repair status first."
-        )
-
-    # 4. Block if linked to open helpdesk tickets
-    open_tickets = execute_single("""
-        SELECT COUNT(*) AS cnt FROM helpdesk_tickets
-        WHERE device_id = %s AND status IN ('open', 'in_progress')
-    """, (device_id,))
-    if open_tickets and open_tickets["cnt"] > 0:
-        raise ValueError(
-            f"Cannot delete — device has {open_tickets['cnt']} open helpdesk "
-            f"ticket(s). Please resolve or close them first."
-        )
-
-    # 5. All checks passed — soft delete
+    # Soft delete within transaction
     old_status = device["status"]
     with Transaction() as cursor:
+        # Close any active assignment
+        if active_assignment:
+            cursor.execute("""
+                UPDATE device_assignments
+                SET returned_date = CURRENT_DATE,
+                    returned_by = %s,
+                    return_reason = 'Asset record deleted/retired by admin',
+                    acceptance_status = CASE
+                        WHEN acceptance_status = 'pending' THEN 'rejected'
+                        ELSE acceptance_status
+                    END
+                WHERE device_id = %s AND returned_date IS NULL
+            """, (deleted_by, device_id))
+
+        # Close any open helpdesk tickets associated with this device
+        cursor.execute("""
+            UPDATE helpdesk_tickets
+            SET status = 'closed', resolved_at = NOW()
+            WHERE device_id = %s AND status IN ('open', 'in_progress')
+        """, (device_id,))
+
+        # Update device record
         cursor.execute("""
             UPDATE devices
             SET is_deleted = TRUE,
@@ -854,17 +853,25 @@ def soft_delete_device(device_id: int, deleted_by: str) -> dict:
             WHERE id = %s
         """, (deleted_by, device_id))
 
-        # 6. Audit log
+        # Audit log
+        cursor.execute(
+            "SELECT id FROM employee WHERE name = %s LIMIT 1",
+            (deleted_by,),
+        )
+        performer = cursor.fetchone()
+        performer_id = performer["id"] if performer else 0
+
+        audit_detail = f"{deleted_by} soft-deleted device: {device_label} (ID: {device_id})"
+        if assigned_name:
+            audit_detail += f" (Previous assignee: {assigned_name})"
+
         cursor.execute("""
             INSERT INTO audit_logs (user_id, event_type, description)
-            VALUES (
-                (SELECT id FROM employee WHERE name = %s LIMIT 1),
-                %s, %s
-            )
+            VALUES (%s, %s, %s)
         """, (
-            deleted_by,
+            performer_id,
             "asset_deleted",
-            f"{deleted_by} soft-deleted device: {device_label} (ID: {device_id})",
+            audit_detail,
         ))
 
     # Log stock event
@@ -877,6 +884,7 @@ def soft_delete_device(device_id: int, deleted_by: str) -> dict:
     return {
         "device_id": device_id,
         "device_label": device_label,
+        "message": f"Device {device_label} deleted successfully.",
         "deleted_by": deleted_by,
     }
 

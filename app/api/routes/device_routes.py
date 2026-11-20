@@ -189,7 +189,7 @@ def allocate_device(current_user, device_id):
     
     if assign_device(device_id, employee_name):
         return jsonify({"success": True, "message": f"Device assigned to {employee_name}. Awaiting acceptance."}), 200
-    return jsonify({"success": False, "error": "Device not found or not available. Only devices with status 'Available' can be assigned."}), 400
+    return jsonify({"success": False, "error": "Device not found or not eligible for assignment. Assets returned to vendor, retired, or under repair cannot be assigned."}), 400
 
 @device_bp.route("/<int:device_id>/return", methods=["POST"])
 @role_required(["hr", "admin", "superadmin", "system_admin"])
